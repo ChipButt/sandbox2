@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Road Drawer Sprite Sheet Demo</title>
+<style>
+:root{--paper:#f4eedf;--panel:#fffdf8;--ink:#1f2529;--muted:#65727b;--accent:#178dd3;--danger:#c73636;--grid:rgba(0,0,0,.12)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;touch-action:none}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;position:fixed;background:var(--paper);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;color:var(--ink)}
+#app{width:100vw;height:100dvh;display:flex;flex-direction:column;background:linear-gradient(#f8f2e6,#eee4d0)}
+header{flex:0 0 auto;background:var(--panel);padding:calc(env(safe-area-inset-top) + 8px) 9px 8px;border-bottom:1px solid rgba(0,0,0,.12)}
+#title{font-size:15px;font-weight:900;line-height:1.15;margin-bottom:7px}.small{font-size:11px;color:var(--muted);font-weight:700;margin-top:3px}
+#buttons{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}button{border:0;border-radius:11px;padding:10px 11px;font-size:14px;font-weight:900;white-space:nowrap;background:#e8edf0;color:#20272b}button.on{background:var(--accent);color:white}button.red{background:#ffe1e1;color:var(--danger)}
+#status{font-size:12px;color:#33424c;margin-top:7px;font-weight:700;min-height:16px}#wrap{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px;overflow:hidden}
+#board{background:#e8f3d2;border:2px solid rgba(0,0,0,.24);border-radius:12px;max-width:96vw;max-height:calc(100dvh - 160px);width:auto;height:auto;display:block;touch-action:none}
+#drawer{position:fixed;left:8px;right:8px;bottom:calc(env(safe-area-inset-bottom) + 8px);background:rgba(255,253,248,.96);border:1px solid rgba(0,0,0,.12);border-radius:14px;padding:8px;display:none;gap:8px;align-items:center;box-shadow:0 8px 24px rgba(0,0,0,.14)}
+#drawer a{color:var(--accent);font-weight:900;text-decoration:none}#spritePreview{display:none;position:fixed;left:8px;right:8px;bottom:calc(env(safe-area-inset-bottom) + 8px);height:230px;overflow:auto;background:white;border:1px solid rgba(0,0,0,.18);border-radius:14px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.16)}#spritePreview canvas{width:576px;height:684px;image-rendering:auto;background:#f4f4f4}.badge{display:inline-block;background:#eaf6ff;color:#126fa8;padding:2px 6px;border-radius:999px;font-size:11px;font-weight:900}
+</style>
+</head>
+<body>
+<div id="app">
+<header>
+<div id="title">Road Drawer Sprite Sheet Demo <span class="badge">36×36</span></div>
+<div id="buttons">
+<button id="drawBtn" class="on">Draw</button><button id="eraseBtn">Erase</button><button id="sampleBtn">Sample</button><button id="clearBtn" class="red">Clear</button><button id="saveBtn">Save PNG</button><button id="sheetBtn">Sprite Sheet</button>
+</div>
+<div id="status">Ready. Touch and drag on the grid.</div>
+<div class="small">Roads use an 8-direction bitmask. The app renders each road by cropping a 36×36 tile from a 16-column sprite sheet.</div>
+</header>
+<div id="wrap"><canvas id="board" width="576" height="792"></canvas></div>
+<div id="drawer"><span>PNG ready.</span><a id="download" download="road-map.png">Tap to download</a><button id="hideDownload">Hide</button></div>
+<div id="spritePreview"><canvas id="spriteCanvas" width="576" height="684"></canvas></div>
+</div>
+<script>
+(function(){
+'use strict';
+const TILE=36, GRID_W=16, GRID_H=22, SPRITE_COLS=16;
+const BIT={"0,-1":1,"1,-1":2,"1,0":4,"1,1":8,"0,1":16,"-1,1":32,"-1,0":64,"-1,-1":128};
+const OPP={1:16,2:32,4:64,8:128,16:1,32:2,64:4,128:8};
+const board=document.getElementById('board'), ctx=board.getContext('2d');
+const sprite=document.createElement('canvas'); sprite.width=576; sprite.height=684; const sctx=sprite.getContext('2d');
+const preview=document.getElementById('spriteCanvas'); const pctx=preview.getContext('2d');
+const roads=new Uint8Array(GRID_W*GRID_H); let mode='draw', drawing=false, last=null, moves=0;
+function idx(x,y){return y*GRID_W+x} function inside(x,y){return x>=0&&y>=0&&x<GRID_W&&y<GRID_H}
+function setStatus(t){document.getElementById('status').textContent=t}
+function rr(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath()}
+function endpoint(bit){const c=TILE/2; if(bit===1)return[c,0]; if(bit===2)return[TILE,0]; if(bit===4)return[TILE,c]; if(bit===8)return[TILE,TILE]; if(bit===16)return[c,TILE]; if(bit===32)return[0,TILE]; if(bit===64)return[0,c]; if(bit===128)return[0,0]; return[c,c]}
+function dashed(c,x1,y1,x2,y2){const dx=x2-x1,dy=y2-y1,d=Math.hypot(dx,dy); if(!d)return; const ux=dx/d,uy=dy/d; c.strokeStyle='#b8b8b8'; c.lineWidth=1; for(let s=5;s<d-4;s+=10){const e=Math.min(s+5,d-4);c.beginPath();c.moveTo(x1+ux*s,y1+uy*s);c.lineTo(x1+ux*e,y1+uy*e);c.stroke()}}
+function drawRoadTile(c,mask,x,y){c.save();c.translate(x,y);const bits=[1,2,4,8,16,32,64,128];c.lineCap='round';c.lineJoin='round';for(const b of bits){if(mask&b){const p=endpoint(b);c.strokeStyle='#cddfe2';c.lineWidth=16;c.beginPath();c.moveTo(18,18);c.lineTo(p[0],p[1]);c.stroke()}}if(mask){c.fillStyle='#cddfe2';c.beginPath();c.arc(18,18,8,0,Math.PI*2);c.fill()}for(const b of bits){if(mask&b){const p=endpoint(b);c.strokeStyle='#f5f2eb';c.lineWidth=12;c.beginPath();c.moveTo(18,18);c.lineTo(p[0],p[1]);c.stroke()}}if(mask){c.fillStyle='#f5f2eb';c.beginPath();c.arc(18,18,6,0,Math.PI*2);c.fill()}for(const b of bits){if(mask&b){const p=endpoint(b);dashed(c,18,18,p[0],p[1])}}c.restore()}
+function tree(c,x,y){c.fillStyle='#79bd52';c.beginPath();c.arc(x,y,3.5,0,Math.PI*2);c.fill();c.fillStyle='#8b6234';c.fillRect(x-1,y+2,2,4)}
+function house(c,x,y,roof){c.fillStyle='#f8e7c8';c.strokeStyle='#ba9464';c.lineWidth=1;c.fillRect(x+4,y+12,14,13);c.strokeRect(x+4,y+12,14,13);c.fillStyle=roof;c.beginPath();c.moveTo(x+2,y+13);c.lineTo(x+11,y+5);c.lineTo(x+20,y+13);c.closePath();c.fill();c.fillStyle='#865932';c.fillRect(x+9,y+18,4,7);c.fillStyle='#5098cc';c.fillRect(x+5,y+15,4,4);c.fillRect(x+14,y+15,4,4)}
+function hub(c,x,y,w,h){c.save();c.translate(x,y);rr(c,2,2,w-4,h-4,5);c.fillStyle='#459dd3';c.fill();c.strokeStyle='#f4f8f0';c.lineWidth=2;c.stroke();c.fillStyle='#2b6f9f';c.fillRect(5,h-13,w-10,8);c.fillStyle='#c5e7f6';for(let i=0;i<Math.max(1,Math.floor(w/36));i++)c.fillRect(12+i*24,7,8,7);c.fillStyle='#354f63';for(let i=0;i<Math.max(1,Math.floor(w/36));i++)c.fillRect(9+i*28,h-11,12,6);c.fillStyle='#e6a62e';c.fillRect(4,h-8,5,5);c.fillRect(w-9,h-8,5,5);c.restore()}
+function grassBase(c,x,y,w,h){c.save();c.translate(x,y);rr(c,2,2,w-4,h-4,5);c.fillStyle='#9fdb71';c.fill();c.strokeStyle='#f4f8f0';c.lineWidth=2;c.stroke();c.restore()}
+function village(c,x,y){grassBase(c,x,y,36,36);c.strokeStyle='#eee1b7';c.lineWidth=4;c.beginPath();c.moveTo(x+18,y+25);c.lineTo(x+18,y+34);c.stroke();house(c,x+7,y+5,'#e6594b');tree(c,x+7,y+26);tree(c,x+28,y+24)}
+function town(c,x,y){grassBase(c,x,y,72,36);c.strokeStyle='#eee1b7';c.lineWidth=4;c.beginPath();c.moveTo(x+11,y+28);c.lineTo(x+60,y+28);c.moveTo(x+36,y+18);c.lineTo(x+36,y+28);c.stroke();house(c,x+9,y+5,'#e6594b');house(c,x+43,y+6,'#f09e3a');tree(c,x+31,y+8);tree(c,x+61,y+23);tree(c,x+6,y+25)}
+function city(c,x,y){grassBase(c,x,y,72,72);c.strokeStyle='#eee1b7';c.lineWidth=5;c.beginPath();c.moveTo(x+36,y+6);c.lineTo(x+36,y+66);c.moveTo(x+7,y+36);c.lineTo(x+66,y+36);c.stroke();c.strokeStyle='#f4f8f0';c.lineWidth=1;c.fillStyle='#4e9bd3';c.fillRect(x+8,y+36,16,28);c.strokeRect(x+8,y+36,16,28);c.fillStyle='#f28b4c';c.fillRect(x+28,y+8,16,22);c.strokeRect(x+28,y+8,16,22);c.fillStyle='#d2dae0';c.fillRect(x+49,y+12,15,26);c.strokeRect(x+49,y+12,15,26);c.fillStyle='#4e9bd3';c.fillRect(x+43,y+43,19,22);c.strokeRect(x+43,y+43,19,22);c.fillStyle='#6ec8e0';c.beginPath();c.arc(x+36,y+51,7,0,Math.PI*2);c.fill();tree(c,x+11,y+11);tree(c,x+60,y+55);tree(c,x+16,y+30);tree(c,x+55,y+7)}
+function makeSpriteSheet(){sctx.clearRect(0,0,sprite.width,sprite.height);for(let m=0;m<256;m++)drawRoadTile(sctx,m,(m%16)*36,Math.floor(m/16)*36);const by=16*36;hub(sctx,0,by,36,36);village(sctx,72,by);town(sctx,144,by);city(sctx,252,by);pctx.clearRect(0,0,preview.width,preview.height);pctx.drawImage(sprite,0,0)}
+function bg(){ctx.fillStyle='#edf4d8';ctx.fillRect(0,0,board.width,board.height);ctx.fillStyle='#d9efc7';rr(ctx,24,30,180,110,24);ctx.fill();rr(ctx,310,430,210,190,28);ctx.fill();ctx.fillStyle='#a7dced';ctx.beginPath();ctx.moveTo(430,0);ctx.bezierCurveTo(390,150,540,190,490,330);ctx.bezierCurveTo(450,450,520,600,490,792);ctx.lineTo(576,792);ctx.lineTo(576,0);ctx.closePath();ctx.fill()}
+function grid(){ctx.strokeStyle='rgba(0,0,0,.13)';ctx.lineWidth=1;for(let x=0;x<=GRID_W;x++){ctx.beginPath();ctx.moveTo(x*TILE+.5,0);ctx.lineTo(x*TILE+.5,board.height);ctx.stroke()}for(let y=0;y<=GRID_H;y++){ctx.beginPath();ctx.moveTo(0,y*TILE+.5);ctx.lineTo(board.width,y*TILE+.5);ctx.stroke()}}
+function drawRoads(){for(let y=0;y<GRID_H;y++)for(let x=0;x<GRID_W;x++){const m=roads[idx(x,y)];if(!m)continue;ctx.drawImage(sprite,(m%16)*36,Math.floor(m/16)*36,36,36,x*36,y*36,36,36)}}
+function drawObjects(){const by=16*36;ctx.drawImage(sprite,72,by,36,36,2*TILE,3*TILE,36,36);ctx.drawImage(sprite,144,by,72,36,9*TILE,4*TILE,72,36);ctx.drawImage(sprite,0,by,36,36,4*TILE,9*TILE,36,36);ctx.drawImage(sprite,252,by,72,72,11*TILE,14*TILE,72,72)}
+function render(){bg();grid();drawRoads();drawObjects()}
+function cell(clientX,clientY){const r=board.getBoundingClientRect();const sx=board.width/r.width,sy=board.height/r.height;const x=Math.floor((clientX-r.left)*sx/TILE),y=Math.floor((clientY-r.top)*sy/TILE);return inside(x,y)?{x,y}:null}
+function connect(a,b){let x=a.x,y=a.y;while(x!==b.x||y!==b.y){const nx=x+Math.sign(b.x-x),ny=y+Math.sign(b.y-y);if(!inside(nx,ny))break;const bit=BIT[`${Math.sign(nx-x)},${Math.sign(ny-y)}`];if(mode==='draw'){roads[idx(x,y)]|=bit;roads[idx(nx,ny)]|=OPP[bit]}else{roads[idx(x,y)]&=~bit;roads[idx(nx,ny)]&=~OPP[bit]}x=nx;y=ny}}
+function start(x,y){drawing=true;last=cell(x,y);moves++;setStatus(`Receiving input. Mode ${mode}. Start ${last?last.x+','+last.y:'outside'}. Move count ${moves}.`)}
+function move(x,y){if(!drawing)return;const cur=cell(x,y);if(cur&&last&&(cur.x!==last.x||cur.y!==last.y)){connect(last,cur);last=cur;moves++;setStatus(`Receiving input. Mode ${mode}. Cell ${cur.x},${cur.y}. Move count ${moves}.`);render()}}
+function end(){drawing=false;last=null}
+board.addEventListener('touchstart',e=>{e.preventDefault();const t=e.touches[0];start(t.clientX,t.clientY)},{passive:false});
+board.addEventListener('touchmove',e=>{e.preventDefault();const t=e.touches[0];move(t.clientX,t.clientY)},{passive:false});
+board.addEventListener('touchend',e=>{e.preventDefault();end()},{passive:false});
+board.addEventListener('pointerdown',e=>{e.preventDefault();try{board.setPointerCapture(e.pointerId)}catch(_e){}start(e.clientX,e.clientY)});
+board.addEventListener('pointermove',e=>{e.preventDefault();move(e.clientX,e.clientY)});
+board.addEventListener('pointerup',e=>{e.preventDefault();end()});
+document.getElementById('drawBtn').onclick=()=>{mode='draw';drawBtn.classList.add('on');eraseBtn.classList.remove('on');setStatus('Draw mode. Touch the grid.')};
+document.getElementById('eraseBtn').onclick=()=>{mode='erase';eraseBtn.classList.add('on');drawBtn.classList.remove('on');setStatus('Erase mode. Touch existing roads.')};
+document.getElementById('clearBtn').onclick=()=>{roads.fill(0);render();setStatus('Cleared.')};
+document.getElementById('sampleBtn').onclick=sample;
+document.getElementById('sheetBtn').onclick=()=>{const el=document.getElementById('spritePreview');el.style.display=el.style.display==='block'?'none':'block'};
+document.getElementById('hideDownload').onclick=()=>document.getElementById('drawer').style.display='none';
+document.getElementById('saveBtn').onclick=()=>{const a=document.getElementById('download');a.href=board.toDataURL('image/png');document.getElementById('drawer').style.display='flex';setStatus('PNG generated. Tap the download link at the bottom.')};
+function sample(){roads.fill(0);const routes=[[[2,3],[3,4],[4,5],[5,6],[6,7],[7,8],[8,9],[9,9],[10,9],[11,10],[12,11],[12,12],[12,13],[12,14],[12,15]],[[4,9],[5,9],[6,9],[7,9],[8,9],[9,8],[9,7],[9,6],[9,5],[9,4]]];for(const pts of routes){for(let i=1;i<pts.length;i++)connect({x:pts[i-1][0],y:pts[i-1][1]},{x:pts[i][0],y:pts[i][1]})}render();setStatus('Sample loaded. Touch and drag to add more roads.')}
+makeSpriteSheet();sample();
+})();
+</script>
+</body>
+</html>
