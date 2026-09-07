@@ -487,10 +487,8 @@ function updateBoarding(){}
 function conveyorSpeedMultiplier(){
   const dispatching=state.motions.some(m=>m.type==='dispatch');
   const allTrucksCommitted=state.yard.length===0&&!dispatching;
-  let mult=1;
-  if(allTrucksCommitted)mult*=2;
-  if(state.holdFast)mult*=2;
-  return mult;
+  // Either condition requests fast mode; both together still mean 2x, never 4x.
+  return (allTrucksCommitted||state.holdFast)?2:1;
 }
 function updateRotationConveyor(dt){
   state.rotationPhase+=dt*ROTATION_SPEED_ROWS*conveyorSpeedMultiplier();
@@ -559,7 +557,7 @@ function blockedTravelDistance(t,trucks){
   const dx=Math.cos(t.angle),dy=Math.sin(t.angle),others=trucks.filter(o=>o.id!==t.id);
   for(let d=3;d<520;d+=3){
     const p=truckPoly(t,t.x+dx*d,t.y+dy*d);
-    if(others.some(o=>polyOverlap(p,truckPoly(o))))return Math.max(3,d-1);
+    if(others.some(o=>polyOverlap(p,truckPoly(o))))return Math.max(3,d);
     if(!insideJam(t,t.x+dx*d,t.y+dy*d))return null;
   }
   return null;
