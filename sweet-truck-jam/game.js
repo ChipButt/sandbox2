@@ -154,7 +154,7 @@
       const freeAfter = clearTrucks(after);
       const newlyFree = freeAfter.filter(b => !initialFree.some(f => f.id === b.id));
       if (newlyFree.length) {
-        return { a: a.id, b: newlyFree[Math.floor(rng() * newlyFree.length)], initialFree: initialFree.map(t => t.id) };
+        return { a: a.id, b: newlyFree[Math.floor(rng() * newlyFree.length)].id, initialFree: initialFree.map(t => t.id) };
       }
     }
     return null;
@@ -252,7 +252,15 @@
   }
 
   function freshState(level) {
-    const generated = generateLevel(level);
+    let generated;
+    try {
+      generated = generateLevel(level);
+      if (!generated || !generated.trucks?.length || !generated.queueOrder?.length) throw new Error('Invalid generated level');
+    } catch (error) {
+      console.error('Level generation failed; using fallback level.', error);
+      generated = fallbackLevel(level);
+      generated.holdingSlots = 5;
+    }
     return {
       level,
       coins: persisted.coins ?? 250,
