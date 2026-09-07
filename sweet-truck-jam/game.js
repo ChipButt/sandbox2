@@ -55,14 +55,14 @@ function text(s,x,y,size,fill='#fff',align='center',weight=900){ctx.fillStyle=fi
 
 function makeCandyPath(){
   const pts=[];
-  // A deliberately narrower centre-only loop. Its outer edge stays well clear
-  // of the two preview feeder lanes on the far left and right.
+  // Compact central conveyor loop. This is intentionally smaller than the
+  // feeder stacks so the preview queues read as separate incoming supplies.
   const segs=[
-    [[210,322],[169,326],[128,309],[114,264]],
-    [[114,264],[100,208],[105,139],[142,101]],
-    [[142,101],[177,68],[244,68],[280,96]],
-    [[280,96],[315,125],[320,195],[307,252]],
-    [[307,252],[296,298],[255,322],[210,322]]
+    [[210,316],[178,319],[145,304],[134,264]],
+    [[134,264],[122,214],[126,151],[154,116]],
+    [[154,116],[182,88],[238,88],[267,112]],
+    [[267,112],[294,138],[298,199],[289,248]],
+    [[289,248],[282,290],[247,314],[210,316]]
   ];
   for(const seg of segs){for(let i=0;i<40;i++){const t=i/40,mt=1-t;pts.push({x:mt*mt*mt*seg[0][0]+3*mt*mt*t*seg[1][0]+3*mt*t*t*seg[2][0]+t*t*t*seg[3][0],y:mt*mt*mt*seg[0][1]+3*mt*mt*t*seg[1][1]+3*mt*t*t*seg[2][1]+t*t*t*seg[3][1]})}}
   pts.push({x:210,y:322});
@@ -89,10 +89,10 @@ function candyPos(index,phase=state?.rotationPhase||0){
 }
 function feederPos(side,index){
   const row=Math.floor(index/FEEDER_COLS),col=index%FEEDER_COLS;
-  // Four-wide preview lanes remain outside the centre. The empty connector below
-  // is what joins them to the central loop.
+  // Four-wide preview stacks continue upward beyond the visible screen. Only
+  // the nearer upcoming rows are visible; deeper level contents stay hidden.
   const centreX=side==='left'?38:382;
-  const y=292-row*9.4;
+  const y=286-row*12.8;
   const off=(col-(FEEDER_COLS-1)/2)*8.6;
   return{x:centreX+off,y};
 }
@@ -102,7 +102,8 @@ function feederJoin(side,col){
 }
 function feederControl(side,col){
   const start=feederPos(side,col),join=feederJoin(side,col);
-  return{x:side==='left'?78:342,y:lerp(start.y,join.y,.52)};
+  // Gentle, shallow merge rather than a sharp curved launch.
+  return{x:side==='left'?88:332,y:lerp(start.y,join.y,.66)};
 }
 
 function truckPoly(t,x=t.x,y=t.y,angle=t.angle){
@@ -246,7 +247,7 @@ function makeSlots(){
 }
 function newState(n){
   const gen=generateLevel(n),pools=splitSweetPools(gen);
-  return{level:n,yard:gen.trucks.map(t=>({...t,state:'yard'})),all:new Map(gen.trucks.map(t=>[t.id,{...t}])),rotation:pools.rotation,leftFeed:pools.leftFeed,rightFeed:pools.rightFeed,slots:makeSlots(),motions:[],particles:[],boarding:null,departures:[],won:false,lost:false,boosters:{shuffle:2,auto:2},coins:250+(n-1)*15,time:0,rotationPhase:0};
+  return{level:n,yard:gen.trucks.map(t=>({...t,state:'yard'})),all:new Map(gen.trucks.map(t=>[t.id,{...t}])),rotation:pools.rotation,leftFeed:pools.leftFeed,rightFeed:pools.rightFeed,slots:makeSlots(),motions:[],particles:[],boarding:null,departures:[],won:false,lost:false,boosters:{shuffle:2,auto:2},coins:250+(n-1)*15,time:0,rotationPhase:0,holdFast:false};
 }
 function sweetsRemaining(){
   return state.rotation.filter(Boolean).length+state.leftFeed.length+state.rightFeed.length;
@@ -373,16 +374,16 @@ function drawQueue(dt){
     const c=state.rotation[i];
     if(!c)continue;
 
-    if(c.entryT<1)c.entryT=Math.min(1,c.entryT+dt*5.2);
+    if(c.entryT<1)c.entryT=Math.min(1,c.entryT+dt*1.85);
     if(c.entryT<1&&c.entryFrom){
-      const to=candyPos(i),u=easeOut(c.entryT);
+      const to=candyPos(i),u=ease(c.entryT);
       let x,y;
-      if(u<.68){
-        const v=u/.68,q=1-v,cp=c.entryControl||c.entryFrom,jp=c.entryJoin||to;
+      if(u<.78){
+        const v=u/.78,q=1-v,cp=c.entryControl||c.entryFrom,jp=c.entryJoin||to;
         x=q*q*c.entryFrom.x+2*q*v*cp.x+v*v*jp.x;
         y=q*q*c.entryFrom.y+2*q*v*cp.y+v*v*jp.y;
       }else{
-        const v=(u-.68)/.32,jp=c.entryJoin||c.entryFrom;
+        const v=(u-.78)/.22,jp=c.entryJoin||c.entryFrom;
         x=lerp(jp.x,to.x,v);y=lerp(jp.y,to.y,v);
       }
       const col=COLORS[c.color];ctx.save();ctx.translate(x,y);ctx.beginPath();ctx.arc(0,0,5.2,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();ctx.restore();
@@ -414,7 +415,21 @@ function drawTruck(t,x=t.x,y=t.y,a=t.angle,parked=false){
 }
 function shade(hex,amt){const n=parseInt(hex.slice(1),16),r=clamp((n>>16)+255*amt,0,255),g=clamp(((n>>8)&255)+255*amt,0,255),b=clamp((n&255)+255*amt,0,255);return`rgb(${r|0},${g|0},${b|0})`}
 
-function drawYard(){for(const t of state.yard){let x=t.x,y=t.y;if(t.shake>0){x+=Math.sin(state.time*70)*4*(t.shake/.3)}drawTruck(t,x,y)}}
+function drawYard(){
+  for(const t of state.yard){
+    let x=t.x,y=t.y;
+    if(t.bump){
+      const u=clamp(t.bump.t/t.bump.duration,0,1);
+      let travel;
+      if(u<.42)travel=easeOut(u/.42)*t.bump.distance;
+      else if(u<.56)travel=t.bump.distance;
+      else travel=(1-ease((u-.56)/.44))*t.bump.distance;
+      x+=Math.cos(t.angle)*travel;
+      y+=Math.sin(t.angle)*travel;
+    }
+    drawTruck(t,x,y);
+  }
+}
 function drawSlotsAndParked(){
   for(let i=0;i<state.slots.length;i++){const s=state.slots[i],t=s.truck;if(!t)continue;drawTruck(t,s.x,s.y,-Math.PI/2,true);const left=t.capacity-(t.loaded||0);text(String(left),s.x,s.y+s.h/2+13,14,'#ffd743','center',1000);ctx.strokeStyle='rgba(66,50,20,.25)'}
 }
@@ -436,7 +451,12 @@ function drawParticles(){
 
 function update(dt){
   state.time+=dt;
-  for(const t of state.yard)if(t.shake>0)t.shake=Math.max(0,t.shake-dt);
+  for(const t of state.yard){
+    if(t.bump){
+      t.bump.t+=dt;
+      if(t.bump.t>=t.bump.duration)t.bump=null;
+    }
+  }
   for(const m of state.motions)m.t+=dt;
   for(let i=state.motions.length-1;i>=0;i--){const m=state.motions[i];if(m.t>=m.duration){state.motions.splice(i,1);finishMotion(m)}}
   for(const p of state.particles)p.t+=dt;state.particles=state.particles.filter(p=>p.t<p.duration);
@@ -464,8 +484,16 @@ function frontRowColor(){
 function beginBoardingIfPossible(){}
 function updateBoarding(){}
 
+function conveyorSpeedMultiplier(){
+  const dispatching=state.motions.some(m=>m.type==='dispatch');
+  const allTrucksCommitted=state.yard.length===0&&!dispatching;
+  let mult=1;
+  if(allTrucksCommitted)mult*=2;
+  if(state.holdFast)mult*=2;
+  return mult;
+}
 function updateRotationConveyor(dt){
-  state.rotationPhase+=dt*ROTATION_SPEED_ROWS;
+  state.rotationPhase+=dt*ROTATION_SPEED_ROWS*conveyorSpeedMultiplier();
   while(state.rotationPhase>=1){
     state.rotationPhase-=1;
     advanceLoopOneRow();
@@ -527,18 +555,32 @@ function checkEnd(){
   }
 }
 
+function blockedTravelDistance(t,trucks){
+  const dx=Math.cos(t.angle),dy=Math.sin(t.angle),others=trucks.filter(o=>o.id!==t.id);
+  for(let d=3;d<520;d+=3){
+    const p=truckPoly(t,t.x+dx*d,t.y+dy*d);
+    if(others.some(o=>polyOverlap(p,truckPoly(o))))return Math.max(3,d-1);
+    if(!insideJam(t,t.x+dx*d,t.y+dy*d))return null;
+  }
+  return null;
+}
+function blockedBump(t){
+  if(t.bump)return;
+  const d=blockedTravelDistance(t,state.yard);
+  if(d==null)return;
+  t.bump={t:0,duration:.58,distance:d};
+  navigator.vibrate?.([12,25,22]);
+}
 function dispatchTruck(t){
   const open=state.slots.findIndex(s=>s.active&&!s.truck&&!state.motions.some(m=>m.type==='dispatch'&&m.slot===state.slots.indexOf(s)));
   if(open<0){showToast('No free parking slot');return}
-  if(!canDriveOut(t,state.yard)){showToast('That truck is blocked');shakeTruck(t);return}
+  if(!canDriveOut(t,state.yard)){blockedBump(t);return}
   state.yard=state.yard.filter(x=>x.id!==t.id);
   const dir={x:Math.cos(t.angle),y:Math.sin(t.angle)};let d=0,ex=t.x,ey=t.y;while(d<520){d+=10;ex=t.x+dir.x*d;ey=t.y+dir.y*d;if(!insideJam(t,ex,ey))break}
-  const s=state.slots[open];const cx=clamp((ex+s.x)/2+(s.y-ey)*.18,30,W-30),cy=clamp(Math.min(ey,s.y)-55,350,485);
-  state.motions.push({type:'dispatch',truck:t,slot:open,sx:t.x,sy:t.y,sa:t.angle,ex,ey,cx,cy,tx:s.x,ty:s.y,t:0,duration:.78});
-  showToast(`${cap(t.color)} truck dispatched`);navigator.vibrate?.(12);
+  const slot=state.slots[open],cx=clamp((ex+slot.x)/2+(slot.y-ey)*.18,30,W-30),cy=clamp(Math.min(ey,slot.y)-55,350,485);
+  state.motions.push({type:'dispatch',truck:t,slot:open,sx:t.x,sy:t.y,sa:t.angle,ex,ey,cx,cy,tx:slot.x,ty:slot.y,t:0,duration:.78});
+  navigator.vibrate?.(12);
 }
-function shakeTruck(t){t.shake=.3}
-
 function hitTruck(x,y){
   for(let i=state.yard.length-1;i>=0;i--){const t=state.yard[i],c=Math.cos(-t.angle),s=Math.sin(-t.angle),dx=x-t.x,dy=y-t.y,lx=dx*c-dy*s,ly=dx*s+dy*c;if(Math.abs(lx)<=t.length/2+5&&Math.abs(ly)<=t.width/2+7)return t}return null
 }
@@ -586,7 +628,38 @@ function showToast(msg){toast.textContent=msg;toast.classList.add('show');clearT
 function showResult(win){overlay.classList.remove('hidden');overlayBadge.textContent=win?'✓':'!';overlayBadge.style.background=win?'#e4f7eb':'#ffe8e8';overlayBadge.style.color=win?'#2b9f5d':'#d14e4e';overlayTitle.textContent=win?'DELIVERED!':'PARKING FULL';overlayText.textContent=win?'Every sweet has been loaded and sent for delivery.':'The parking area is full and none of the parked trucks can take the next colour in the centre rotation.';overlayPrimary.textContent=win?'NEXT LEVEL':'TRY AGAIN';overlayPrimary.onclick=()=>start(win?level+1:level);overlaySecondary.onclick=()=>start(level)}
 function cap(s){return s.charAt(0).toUpperCase()+s.slice(1)}
 
-canvas.addEventListener('pointerdown',e=>{e.preventDefault();const r=canvas.getBoundingClientRect();pointer.x=(e.clientX-r.left-ox)/scale;pointer.y=(e.clientY-r.top-oy)/scale;handleTap(pointer.x,pointer.y)},{passive:false});
+let pressInfo=null;
+function eventToGame(e){
+  const r=canvas.getBoundingClientRect();
+  return{x:(e.clientX-r.left-ox)/scale,y:(e.clientY-r.top-oy)/scale};
+}
+function inTruckSelectionArea(x,y){
+  return x>=JAM.x&&x<=JAM.x+JAM.w&&y>=JAM.y&&y<=JAM.y+JAM.h;
+}
+canvas.addEventListener('pointerdown',e=>{
+  e.preventDefault();
+  const p=eventToGame(e);
+  pointer.x=p.x;pointer.y=p.y;
+  pressInfo={x:p.x,y:p.y,started:performance.now(),moved:false,inYard:inTruckSelectionArea(p.x,p.y)};
+  if(pressInfo.inYard)state.holdFast=true;
+  try{canvas.setPointerCapture(e.pointerId)}catch(_){}
+},{passive:false});
+canvas.addEventListener('pointermove',e=>{
+  if(!pressInfo)return;
+  const p=eventToGame(e);
+  if(Math.hypot(p.x-pressInfo.x,p.y-pressInfo.y)>10)pressInfo.moved=true;
+},{passive:false});
+function finishPress(e,cancelled=false){
+  if(!pressInfo)return;
+  const info=pressInfo;pressInfo=null;
+  state.holdFast=false;
+  if(cancelled)return;
+  const held=performance.now()-info.started;
+  if(!info.moved&&held<320)handleTap(info.x,info.y);
+}
+canvas.addEventListener('pointerup',e=>{e.preventDefault();finishPress(e,false)},{passive:false});
+canvas.addEventListener('pointercancel',e=>finishPress(e,true),{passive:false});
+canvas.addEventListener('lostpointercapture',e=>{if(pressInfo)finishPress(e,true)},{passive:false});
 
 function frame(ts){const dt=Math.min(.033,(ts-last)/1000||.016);last=ts;update(dt);drawBackground();drawQueue(dt);drawSlotsAndParked();drawYard();drawMotions();drawParticles();drawTopUI();drawBoosters();requestAnimationFrame(frame)}
 
