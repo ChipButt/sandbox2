@@ -370,6 +370,8 @@ function handleTap(x,y){
     if(Math.hypot(x-260,y-857)<40)return shuffleGroups();
     if(Math.hypot(x-355,y-857)<40){showToast('Shop placeholder');return}
   }
+  const locked=state.slots[4];
+  if(locked&&!locked.active&&Math.abs(x-locked.x)<=locked.w*.7&&Math.abs(y-locked.y)<=locked.h*.65)return unlockSlot();
   const t=hitTruck(x,y);if(t)dispatchTruck(t);
 }
 function autoMove(){if(state.boosters.auto<=0){showToast('No AUTO boosts left');return}const targetColor=state.rotation[0]?.color;const candidates=state.yard.filter(t=>t.color===targetColor&&canDriveOut(t,state.yard));if(!candidates.length){showToast('No matching clear truck');return}state.boosters.auto--;dispatchTruck(candidates[0])}
