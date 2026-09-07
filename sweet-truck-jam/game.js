@@ -469,7 +469,7 @@ function processOutletRow(){
   if(leaving){
     const slot=state.slots[slotIndex],truck=slot.truck;
     for(let i=0;i<4;i++){
-      const c=row[i],cp=candyPos(i,0),lateral=(i-1.5)*4.5;
+      const c=row[i],cp=candyPos(i,1),lateral=(i-1.5)*4.5;
       state.particles.push({
         color:c.color,
         sx:cp.x,sy:cp.y,
