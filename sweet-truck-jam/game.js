@@ -49,6 +49,9 @@
   let busy = false;
   let audioCtx = null;
   const persisted = loadSave();
+  const motionLayer = document.createElement('div');
+  motionLayer.className = 'motion-layer';
+  document.body.appendChild(motionLayer);
 
   function loadSave() {
     try {
@@ -342,6 +345,7 @@
   function makeMiniTruck(truck) {
     const mini = document.createElement('div');
     mini.className = 'mini-truck';
+    mini.dataset.truckId = truck.id;
     mini.style.setProperty('--truck', colorHex(truck.color));
     mini.title = `${truck.color} truck`;
     return mini;
@@ -446,20 +450,28 @@
     if (state.history.length > 20) state.history.shift();
     busy = true;
     renderBoosters();
-    animateDeparture(truck, el);
-    await sleep(360);
+
+    const destination = canLoadNow
+      ? els.loading
+      : els.holding.children[state.holding.length];
+
+    setHint(canLoadNow
+      ? `${capitalize(truck.color)} truck heading to loading`
+      : `${capitalize(truck.color)} truck heading to a holding bay`);
+
+    await animateYardTruckTo(truck, el, destination);
     state.trucks = state.trucks.filter(t => t.id !== id);
+    renderYard();
 
     if (canLoadNow) {
       await loadTruck(truck);
     } else {
       state.holding.push(id);
+      renderHolding();
       setHint(`${capitalize(truck.color)} truck waiting in a holding bay`);
       tone(280, .05);
     }
 
-    renderYard();
-    renderHolding();
     renderQueue();
     await processHolding();
     busy = false;
@@ -467,36 +479,34 @@
     evaluateEnd();
   }
 
-  function animateDeparture(truck, el) {
-    const distance = 125;
-    let tx = 0, ty = 0;
-    if (truck.axis === 'h') tx = truck.dir * distance;
-    else ty = truck.dir * distance;
-    el.classList.add('departing');
-    el.style.transform = `translate(${tx}vw, ${ty}vh)`;
-    tone(520, .06);
-    vibrate(18);
-  }
-
   async function loadTruck(truck) {
     state.activeLoad = truck.id;
     renderLoading();
-    const countBefore = state.queue.length;
+    await sleep(55);
+
     let loaded = 0;
     while (loaded < truck.capacity && state.queue[0] === truck.color) {
+      const sweetEl = els.queue.querySelector('.sweet');
+      const truckEl = els.loading.querySelector('.mini-truck');
+      if (sweetEl && truckEl) await animateSweetIntoTruck(sweetEl, truckEl);
       state.queue.shift();
       loaded++;
+      renderQueue();
+      pulseLoadingTruck();
+      tone(650 + loaded * 18, .035);
+      await sleep(35);
     }
-    renderQueue();
-    setHint(`Loading ${loaded} ${truck.color} sweets`, 'good');
-    tone(660, .05);
-    await sleep(Math.min(520, 160 + loaded * 45));
-    state.activeLoad = null;
-    renderLoading();
-    if (countBefore !== state.queue.length) {
+
+    if (loaded) {
       state.coins += Math.max(1, Math.floor(loaded / 2));
       els.coins.textContent = state.coins;
+      setHint(`Loaded ${loaded} ${truck.color} sweets`, 'good');
     }
+
+    await sleep(120);
+    await animateLoadingTruckAway(truck);
+    state.activeLoad = null;
+    renderLoading();
   }
 
   async function processHolding() {
@@ -506,13 +516,151 @@
       const next = state.queue[0];
       const idx = state.holding.findIndex(id => getTruckAnywhere(id)?.color === next);
       if (idx >= 0) {
-        const id = state.holding.splice(idx, 1)[0];
+        const id = state.holding[idx];
         const truck = getTruckAnywhere(id);
+        const source = els.holding.querySelector(`[data-truck-id="${id}"]`);
+        setHint(`${capitalize(truck.color)} truck moving from holding to loading`, 'good');
+        if (source) await animateBetweenElements(truck, source, els.loading, 420);
+        state.holding.splice(idx, 1);
         renderHolding();
         await loadTruck(truck);
         moved = true;
       }
     }
+  }
+
+  async function animateYardTruckTo(truck, sourceEl, targetEl) {
+    if (!sourceEl || !targetEl) return;
+    const src = sourceEl.getBoundingClientRect();
+    const yard = els.yard.getBoundingClientRect();
+    const target = targetEl.getBoundingClientRect();
+    const clone = makeMotionClone(sourceEl, src);
+    sourceEl.style.visibility = 'hidden';
+
+    let exitX = 0;
+    let exitY = 0;
+    const pad = 22;
+    if (truck.axis === 'h' && truck.dir > 0) exitX = yard.right - src.left + pad;
+    if (truck.axis === 'h' && truck.dir < 0) exitX = yard.left - src.right - pad;
+    if (truck.axis === 'v' && truck.dir > 0) exitY = yard.bottom - src.top + pad;
+    if (truck.axis === 'v' && truck.dir < 0) exitY = yard.top - src.bottom - pad;
+
+    tone(500, .045);
+    vibrate(15);
+    await runMotion(clone, [
+      { transform: 'translate(0px, 0px) scale(1)', offset: 0 },
+      { transform: `translate(${exitX}px, ${exitY}px) scale(1)`, offset: 1 }
+    ], 300, 'cubic-bezier(.25,.65,.3,1)');
+
+    const dx = target.left + target.width / 2 - (src.left + src.width / 2);
+    const dy = target.top + target.height / 2 - (src.top + src.height / 2);
+    const scale = Math.max(.34, Math.min(.72, Math.min(
+      Math.max(24, target.width * .72) / src.width,
+      Math.max(20, target.height * .64) / src.height
+    )));
+    const turn = truck.axis === 'v' ? (truck.dir > 0 ? -90 : 90) : (truck.dir > 0 ? 0 : 180);
+    const midX = (exitX + dx) / 2 + (dy - exitY) * .10;
+    const midY = (exitY + dy) / 2 - (dx - exitX) * .06;
+
+    await runMotion(clone, [
+      { transform: `translate(${exitX}px, ${exitY}px) rotate(0deg) scale(1)`, offset: 0 },
+      { transform: `translate(${midX}px, ${midY}px) rotate(${turn * .55}deg) scale(${(1 + scale) / 2})`, offset: .55 },
+      { transform: `translate(${dx}px, ${dy}px) rotate(${turn}deg) scale(${scale})`, offset: 1 }
+    ], 470, 'cubic-bezier(.2,.72,.25,1)');
+
+    clone.remove();
+  }
+
+  async function animateBetweenElements(truck, sourceEl, targetEl, duration = 400) {
+    const src = sourceEl.getBoundingClientRect();
+    const target = targetEl.getBoundingClientRect();
+    const clone = makeMotionClone(sourceEl, src);
+    sourceEl.style.visibility = 'hidden';
+    const dx = target.left + target.width / 2 - (src.left + src.width / 2);
+    const dy = target.top + target.height / 2 - (src.top + src.height / 2);
+    const midX = dx * .48 + dy * .10;
+    const midY = dy * .48 - dx * .08;
+    await runMotion(clone, [
+      { transform: 'translate(0px,0px) scale(1)', offset: 0 },
+      { transform: `translate(${midX}px,${midY}px) scale(1.08)`, offset: .5 },
+      { transform: `translate(${dx}px,${dy}px) scale(.9)`, offset: 1 }
+    ], duration, 'cubic-bezier(.25,.72,.25,1)');
+    clone.remove();
+  }
+
+  async function animateSweetIntoTruck(sourceEl, targetEl) {
+    const src = sourceEl.getBoundingClientRect();
+    const target = targetEl.getBoundingClientRect();
+    const clone = sourceEl.cloneNode(true);
+    clone.classList.add('motion-sweet');
+    Object.assign(clone.style, {
+      left: `${src.left}px`,
+      top: `${src.top}px`,
+      width: `${src.width}px`,
+      height: `${src.height}px`
+    });
+    motionLayer.appendChild(clone);
+    const dx = target.left + target.width * .42 - (src.left + src.width / 2);
+    const dy = target.top + target.height * .52 - (src.top + src.height / 2);
+    const lift = Math.min(-42, dy - 25);
+    await runMotion(clone, [
+      { transform: 'translate(0,0) scale(1)', opacity: 1, offset: 0 },
+      { transform: `translate(${dx * .48}px,${lift}px) scale(.92)`, opacity: 1, offset: .48 },
+      { transform: `translate(${dx}px,${dy}px) scale(.42)`, opacity: .95, offset: .9 },
+      { transform: `translate(${dx}px,${dy}px) scale(.2)`, opacity: 0, offset: 1 }
+    ], 220, 'cubic-bezier(.2,.7,.25,1)');
+    clone.remove();
+  }
+
+  function pulseLoadingTruck() {
+    const el = els.loading.querySelector('.mini-truck');
+    if (!el || !el.animate) return;
+    el.animate([
+      { transform: 'translateY(0) scale(1)' },
+      { transform: 'translateY(-2px) scale(1.06)' },
+      { transform: 'translateY(0) scale(1)' }
+    ], { duration: 130, easing: 'ease-out' });
+  }
+
+  async function animateLoadingTruckAway(truck) {
+    const sourceEl = els.loading.querySelector('.mini-truck');
+    if (!sourceEl) return;
+    const src = sourceEl.getBoundingClientRect();
+    const clone = makeMotionClone(sourceEl, src);
+    sourceEl.style.visibility = 'hidden';
+    const dx = window.innerWidth - src.left + 90;
+    tone(560, .05);
+    await runMotion(clone, [
+      { transform: 'translate(0,0) scale(1)', opacity: 1 },
+      { transform: 'translate(22px,0) scale(1.03)', opacity: 1, offset: .18 },
+      { transform: `translate(${dx}px,0) scale(1)`, opacity: .9, offset: 1 }
+    ], 460, 'cubic-bezier(.32,.65,.3,1)');
+    clone.remove();
+  }
+
+  function makeMotionClone(sourceEl, rect) {
+    const clone = sourceEl.cloneNode(true);
+    clone.removeAttribute('id');
+    clone.classList.add('motion-copy');
+    Object.assign(clone.style, {
+      left: `${rect.left}px`,
+      top: `${rect.top}px`,
+      width: `${rect.width}px`,
+      height: `${rect.height}px`,
+      visibility: 'visible'
+    });
+    motionLayer.appendChild(clone);
+    return clone;
+  }
+
+  function runMotion(el, keyframes, duration, easing) {
+    if (!el.animate) {
+      const last = keyframes[keyframes.length - 1];
+      Object.assign(el.style, last);
+      return sleep(duration);
+    }
+    const anim = el.animate(keyframes, { duration, easing, fill: 'forwards' });
+    return anim.finished.catch(() => {});
   }
 
   function getTruckAnywhere(id) {
