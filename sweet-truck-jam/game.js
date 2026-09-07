@@ -21,13 +21,14 @@ const overlaySecondary=document.getElementById('overlaySecondary');
 
 let dpr=1,scale=1,ox=0,oy=0,last=0,level=1,state=null,toastTimer=0;
 let candyPath=[];
-const ROTATION_CAPACITY=240;
+const ROTATION_CAPACITY=144;
 const ROTATION_COLS=4;
 const FEEDER_COLS=4;
 const ROTATION_SPEED_ROWS=4.5;
 const LOOP_ROWS=ROTATION_CAPACITY/ROTATION_COLS;
-const LEFT_JOIN_ROW=12;
-const RIGHT_JOIN_ROW=48;
+if(LOOP_ROWS>36)throw new Error('Central rotation may not exceed 36 rows');
+const LEFT_JOIN_ROW=7;
+const RIGHT_JOIN_ROW=29;
 const pointer={x:0,y:0};
 
 function resize(){
