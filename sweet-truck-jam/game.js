@@ -22,8 +22,8 @@ const overlaySecondary=document.getElementById('overlaySecondary');
 let dpr=1,scale=1,ox=0,oy=0,last=0,level=1,state=null,toastTimer=0;
 let candyPath=[];
 const ROTATION_CAPACITY=240;
-const ROTATION_COLS=5;
-const FEEDER_COLS=6;
+const ROTATION_COLS=4;
+const FEEDER_COLS=4;
 const pointer={x:0,y:0};
 
 function resize(){
@@ -77,16 +77,20 @@ function candyPos(index){
   const p=candyPath[pi]||candyPath[candyPath.length-1];
   const p2=candyPath[Math.min(pi+1,candyPath.length-1)]||p;
   let dx=p2.x-p.x,dy=p2.y-p.y;let len=Math.hypot(dx,dy)||1;dx/=len;dy/=len;
-  const nx=-dy,ny=dx; const off=(col-(ROTATION_COLS-1)/2)*10.6;
+  const nx=-dy,ny=dx; const off=(col-(ROTATION_COLS-1)/2)*10.8;
   return{x:p.x+nx*off,y:p.y+ny*off};
 }
 function feederPos(side,index){
   const row=Math.floor(index/FEEDER_COLS),col=index%FEEDER_COLS;
-  const baseX=side==='left'?42:378;
-  const y=66+row*9.3;
-  const off=(col-(FEEDER_COLS-1)/2)*8.7;
-  const curve=Math.min(1,row/22);
-  return{x:baseX+off+(side==='left'?1:-1)*curve*16,y};
+  // Four abreast. The next sweets sit at the bottom of a separate outer feeder lane;
+  // later sweets continue upward/off-screen, keeping both feeders clear of the centre loop.
+  const edgeX=side==='left'?18:402;
+  const mouthShift=(side==='left'?1:-1)*10;
+  const straighten=Math.min(1,row/14);
+  const centreX=edgeX+mouthShift*(1-straighten);
+  const y=262-row*9.4;
+  const off=(col-(FEEDER_COLS-1)/2)*8.6;
+  return{x:centreX+off,y};
 }
 
 function truckPoly(t,x=t.x,y=t.y,angle=t.angle){
@@ -186,19 +190,20 @@ function drawBackground(){
 function drawCrowdTrack(){
   ctx.save();ctx.lineCap='round';ctx.lineJoin='round';
   // central rotation track
-  ctx.beginPath();candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.strokeStyle='#aebbc4';ctx.lineWidth=88;ctx.stroke();
-  ctx.beginPath();candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.strokeStyle='#f7fafc';ctx.lineWidth=78;ctx.stroke();
-  ctx.beginPath();candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.strokeStyle='#d6e0e6';ctx.lineWidth=70;ctx.stroke();
+  ctx.beginPath();candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.strokeStyle='#aebbc4';ctx.lineWidth=56;ctx.stroke();
+  ctx.beginPath();candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.strokeStyle='#f7fafc';ctx.lineWidth=50;ctx.stroke();
+  ctx.beginPath();candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.strokeStyle='#d6e0e6';ctx.lineWidth=44;ctx.stroke();
 
-  // left and right feeder channels: left drains completely before right begins
+  // Separate four-wide feeder channels. They stop outside the centre loop
+  // with a visible gap, so the preview flows never overlap the current rotation.
   for(const side of ['left','right']){
-    const x=side==='left'?42:378,join=side==='left'?84:336;
-    ctx.beginPath();ctx.moveTo(x,58);ctx.lineTo(x,215);ctx.quadraticCurveTo(x,265,join,286);
-    ctx.strokeStyle='#aebbc4';ctx.lineWidth=61;ctx.stroke();
-    ctx.beginPath();ctx.moveTo(x,58);ctx.lineTo(x,215);ctx.quadraticCurveTo(x,265,join,286);
-    ctx.strokeStyle='#f7fafc';ctx.lineWidth=53;ctx.stroke();
-    ctx.beginPath();ctx.moveTo(x,58);ctx.lineTo(x,215);ctx.quadraticCurveTo(x,265,join,286);
-    ctx.strokeStyle='#d6e0e6';ctx.lineWidth=46;ctx.stroke();
+    const x=side==='left'?18:402,mouth=side==='left'?28:392;
+    ctx.beginPath();ctx.moveTo(x,28);ctx.lineTo(x,188);ctx.quadraticCurveTo(x,232,mouth,262);
+    ctx.strokeStyle='#aebbc4';ctx.lineWidth=38;ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x,28);ctx.lineTo(x,188);ctx.quadraticCurveTo(x,232,mouth,262);
+    ctx.strokeStyle='#f7fafc';ctx.lineWidth=34;ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x,28);ctx.lineTo(x,188);ctx.quadraticCurveTo(x,232,mouth,262);
+    ctx.strokeStyle='#d6e0e6';ctx.lineWidth=30;ctx.stroke();
   }
   ctx.restore();
   roundedRect(185,317,50,43,15,'#778798','#f7fafc',4);
