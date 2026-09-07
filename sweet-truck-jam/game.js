@@ -24,7 +24,7 @@ let candyPath=[];
 const ROTATION_CAPACITY=240;
 const ROTATION_COLS=4;
 const FEEDER_COLS=4;
-const ROTATION_SPEED_ROWS=.85;
+const ROTATION_SPEED_ROWS=3.4;
 const pointer={x:0,y:0};
 
 function resize(){
@@ -75,7 +75,8 @@ candyPath=makeCandyPath();
 function candyPos(index,phase=state?.rotationPhase||0){
   const row=Math.floor(index/ROTATION_COLS),col=index%ROTATION_COLS;
   const rows=ROTATION_CAPACITY/ROTATION_COLS;
-  const rowProgress=((row+phase)%rows+rows)%rows;
+  // Negative phase makes each successive row advance toward row 0, the outlet.
+  const rowProgress=((row-phase)%rows+rows)%rows;
   const pathProgress=rowProgress/rows;
   const exact=pathProgress*(candyPath.length-1);
   const i0=Math.floor(exact),i1=(i0+1)%candyPath.length,t=exact-i0;
@@ -352,7 +353,7 @@ function drawQueue(dt){
 
   for(let i=state.rotation.length-1;i>=0;i--){
     const c=state.rotation[i],target=i;
-    c.visualIndex+=(target-c.visualIndex)*Math.min(1,dt*5.5);
+    c.visualIndex+=(target-c.visualIndex)*Math.min(1,dt*9);
     if(c.entryT<1)c.entryT=Math.min(1,c.entryT+dt*2.8);
     if(c.entryT<1&&c.entryFrom){
       const to=candyPos(c.visualIndex),u=easeOut(c.entryT);
@@ -415,12 +416,12 @@ function drawParticles(){
 
 function update(dt){
   state.time+=dt;
-  if(state.rotation.length)state.rotationPhase=(state.rotationPhase+dt*ROTATION_SPEED_ROWS)%(ROTATION_CAPACITY/ROTATION_COLS);
   for(const t of state.yard)if(t.shake>0)t.shake=Math.max(0,t.shake-dt);
   for(const m of state.motions)m.t+=dt;
   for(let i=state.motions.length-1;i>=0;i--){const m=state.motions[i];if(m.t>=m.duration){state.motions.splice(i,1);finishMotion(m)}}
   for(const p of state.particles)p.t+=dt;state.particles=state.particles.filter(p=>p.t<p.duration);
-  updateBoarding(dt);
+
+  updateRotationConveyor(dt);
 }
 function finishMotion(m){
   if(m.type==='dispatch'){
@@ -436,47 +437,67 @@ function frontRowColor(){
   return row.every(c=>c.color===row[0].color)?row[0].color:null;
 }
 function beginBoardingIfPossible(){
-  if(state.boarding)return;
-  const rowColor=frontRowColor();
-  if(!rowColor)return;
-  const idx=state.slots.findIndex(s=>s.truck&&s.truck.color===rowColor&&((s.truck.loaded||0)+4)<=s.truck.capacity);
-  if(idx>=0)state.boarding={slot:idx,timer:.18};
+  // Loading is now synchronised to rows physically reaching the outlet.
 }
-function updateBoarding(dt){
-  if(!state.boarding){beginBoardingIfPossible();return}
-  const b=state.boarding,s=state.slots[b.slot],t=s?.truck;if(!t){state.boarding=null;return}
+function updateBoarding(){
+  // Kept as a compatibility no-op; the conveyor handles row loading.
+}
+function updateRotationConveyor(dt){
+  if(!state.rotation.length)return;
 
-  const rowColor=frontRowColor();
-  if(!rowColor||rowColor!==t.color){state.boarding=null;return}
-
-  b.timer-=dt;if(b.timer>0)return;b.timer=.16;
-
-  const row=state.rotation.slice(0,4);
-  if(row.length!==4||row.some(c=>c.color!==rowColor)){state.boarding=null;return}
-
-  for(let i=0;i<4;i++){
-    const c=row[i],cp=candyPos(c.visualIndex);
-    const lateral=(i-1.5)*4.5;
-    state.particles.push({
-      color:c.color,
-      sx:cp.x,sy:cp.y,
-      cx:lerp(cp.x,s.x,.55)+lateral,
-      cy:Math.min(cp.y,s.y)-24,
-      tx:s.x+lateral,ty:s.y-8,
-      t:0,duration:.34
-    });
+  state.rotationPhase+=dt*ROTATION_SPEED_ROWS;
+  while(state.rotationPhase>=1&&state.rotation.length>=4){
+    state.rotationPhase-=1;
+    processOutletRow();
   }
+}
+function processOutletRow(){
+  const row=state.rotation.slice(0,4);
+  if(row.length!==4||row.some(c=>c.color!==row[0].color))throw new Error('Invalid row reached outlet');
+  const rowColor=row[0].color;
+
+  // A parked matching truck takes this complete row. Otherwise it passes the
+  // outlet and continues around the centre loop.
+  const slotIndex=state.slots.findIndex(s=>s.truck&&s.truck.color===rowColor&&((s.truck.loaded||0)+4)<=s.truck.capacity);
+  const leaving=slotIndex>=0;
 
   state.rotation.splice(0,4);
-  t.loaded=(t.loaded||0)+4;
-  refillRotation();
+  for(const c of state.rotation)c.visualIndex-=4;
 
-  if(t.loaded>=t.capacity){state.boarding=null;setTimeout(()=>startDeparture(b.slot),110)}
+  if(leaving){
+    const slot=state.slots[slotIndex],truck=slot.truck;
+    for(let i=0;i<4;i++){
+      const c=row[i],cp=candyPos(i,0),lateral=(i-1.5)*4.5;
+      state.particles.push({
+        color:c.color,
+        sx:cp.x,sy:cp.y,
+        cx:lerp(cp.x,slot.x,.55)+lateral,
+        cy:Math.min(cp.y,slot.y)-24,
+        tx:slot.x+lateral,ty:slot.y-8,
+        t:0,duration:.34
+      });
+    }
+    truck.loaded=(truck.loaded||0)+4;
+    if(truck.loaded>=truck.capacity)setTimeout(()=>startDeparture(slotIndex),110);
+    refillRotation();
+  }else{
+    // No matching truck: the intact four-sweet row loops past the outlet and
+    // rejoins the back of the current rotation.
+    const base=state.rotation.length;
+    for(let i=0;i<4;i++){
+      row[i].visualIndex=base+i;
+      row[i].entryT=1;
+      state.rotation.push(row[i]);
+    }
+  }
+
+  if(!rowsAreValid(state.rotation))throw new Error('Rotation row integrity lost');
+  checkEnd();
 }
 function startDeparture(slotIndex){
   if(!state||state.won||state.lost)return;const s=state.slots[slotIndex],t=s?.truck;if(!t)return;s.truck=null;
   state.motions.push({type:'depart',truck:t,slot:slotIndex,sx:s.x,sy:s.y,sa:-Math.PI/2,tx:W+90,ty:360,t:0,duration:.55});
-  beginBoardingIfPossible();
+  checkEnd();
 }
 function checkEnd(){
   if(sweetsRemaining()===0&&state.yard.length===0&&state.slots.every(s=>!s.truck)&&state.motions.length===0){state.won=true;showResult(true);return}
