@@ -362,7 +362,7 @@ function drawCandy(c,index){
 }
 function drawFeederCandy(c,side,index,dt){
   if(c.feedVisualIndex==null)c.feedVisualIndex=index;
-  c.feedVisualIndex+=(index-c.feedVisualIndex)*Math.min(1,dt*8);
+  c.feedVisualIndex+=(index-c.feedVisualIndex)*Math.min(1,dt*4.2);
   const p=feederPos(side,c.feedVisualIndex),col=COLORS[c.color];
   ctx.save();ctx.translate(p.x,p.y);ctx.beginPath();ctx.arc(1.4,2.1,5.1,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.17)';ctx.fill();ctx.beginPath();ctx.arc(0,0,5,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();ctx.beginPath();ctx.arc(-1.6,-1.7,1.45,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.43)';ctx.fill();ctx.restore();
 }
@@ -374,18 +374,16 @@ function drawQueue(dt){
     const c=state.rotation[i];
     if(!c)continue;
 
-    if(c.entryT<1)c.entryT=Math.min(1,c.entryT+dt*1.85);
+    if(c.entryT<1)c.entryT=Math.min(1,c.entryT+dt*1.18);
     if(c.entryT<1&&c.entryFrom){
-      const to=candyPos(i),u=ease(c.entryT);
-      let x,y;
-      if(u<.78){
-        const v=u/.78,q=1-v,cp=c.entryControl||c.entryFrom,jp=c.entryJoin||to;
-        x=q*q*c.entryFrom.x+2*q*v*cp.x+v*v*jp.x;
-        y=q*q*c.entryFrom.y+2*q*v*cp.y+v*v*jp.y;
-      }else{
-        const v=(u-.78)/.22,jp=c.entryJoin||c.entryFrom;
-        x=lerp(jp.x,to.x,v);y=lerp(jp.y,to.y,v);
-      }
+      const to=candyPos(i),u=ease(c.entryT),q=1-u;
+      const c1=c.entryControl||c.entryFrom;
+      const join=c.entryJoin||to;
+      // One continuous cubic path from feeder stack into the moving loop gap.
+      // No mid-animation segment switch, so the row stays smooth and coherent.
+      const c2={x:lerp(join.x,to.x,.42),y:lerp(join.y,to.y,.42)};
+      const x=q*q*q*c.entryFrom.x+3*q*q*u*c1.x+3*q*u*u*c2.x+u*u*u*to.x;
+      const y=q*q*q*c.entryFrom.y+3*q*q*u*c1.y+3*q*u*u*c2.y+u*u*u*to.y;
       const col=COLORS[c.color];ctx.save();ctx.translate(x,y);ctx.beginPath();ctx.arc(0,0,5.2,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();ctx.restore();
     }else{
       const p=candyPos(i),col=COLORS[c.color];
@@ -446,7 +444,19 @@ function motionPose(m){
   return{x:m.sx,y:m.sy,a:m.sa}
 }
 function drawParticles(){
-  for(const p of state.particles){const u=clamp(p.t/p.duration,0,1),q=1-u,x=q*q*p.sx+2*q*u*p.cx+u*u*p.tx,y=q*q*p.sy+2*q*u*p.cy+u*u*p.ty - Math.sin(u*Math.PI)*5;ctx.globalAlpha=1-u*.18;ctx.beginPath();ctx.arc(x,y,4.8*(1-u*.10),0,Math.PI*2);ctx.fillStyle=COLORS[p.color];ctx.fill();ctx.beginPath();ctx.arc(x-1.5,y-1.5,1.3,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.48)';ctx.fill();ctx.globalAlpha=1}
+  for(const p of state.particles){
+    const local=p.t-(p.delay||0);
+    if(local<0)continue;
+    const raw=clamp(local/p.duration,0,1),u=ease(raw),q=1-u;
+    const c1x=p.c1x??p.cx??p.sx,c1y=p.c1y??p.cy??p.sy;
+    const c2x=p.c2x??p.cx??p.tx,c2y=p.c2y??p.cy??p.ty;
+    const x=q*q*q*p.sx+3*q*q*u*c1x+3*q*u*u*c2x+u*u*u*p.tx;
+    const y=q*q*q*p.sy+3*q*q*u*c1y+3*q*u*u*c2y+u*u*u*p.ty;
+    ctx.globalAlpha=1-raw*.12;
+    ctx.beginPath();ctx.arc(x,y,4.8*(1-raw*.06),0,Math.PI*2);ctx.fillStyle=COLORS[p.color];ctx.fill();
+    ctx.beginPath();ctx.arc(x-1.5,y-1.5,1.3,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.48)';ctx.fill();
+    ctx.globalAlpha=1;
+  }
 }
 
 function update(dt){
@@ -459,7 +469,7 @@ function update(dt){
   }
   for(const m of state.motions)m.t+=dt;
   for(let i=state.motions.length-1;i>=0;i--){const m=state.motions[i];if(m.t>=m.duration){state.motions.splice(i,1);finishMotion(m)}}
-  for(const p of state.particles)p.t+=dt;state.particles=state.particles.filter(p=>p.t<p.duration);
+  for(const p of state.particles)p.t+=dt;state.particles=state.particles.filter(p=>p.t<(p.delay||0)+p.duration);
 
   updateRotationConveyor(dt);
 }
@@ -512,17 +522,20 @@ function advanceLoopOneRow(){
       const slot=state.slots[slotIndex],truck=slot.truck;
       for(let i=0;i<4;i++){
         const c=outletRow[i],cp=candyPos(base+i,1),lateral=(i-1.5)*4.5;
+        const tx=slot.x+lateral,ty=slot.y-8;
         state.particles.push({
           color:c.color,
           sx:cp.x,sy:cp.y,
-          cx:lerp(cp.x,slot.x,.55)+lateral,
-          cy:Math.min(cp.y,slot.y)-24,
-          tx:slot.x+lateral,ty:slot.y-8,
-          t:0,duration:.34
+          c1x:lerp(cp.x,tx,.32),c1y:lerp(cp.y,ty,.24),
+          c2x:lerp(cp.x,tx,.74),c2y:lerp(cp.y,ty,.78),
+          tx,ty,
+          t:0,
+          delay:i*.018,
+          duration:.56
         });
       }
       truck.loaded=(truck.loaded||0)+4;
-      if(truck.loaded>=truck.capacity)setTimeout(()=>startDeparture(slotIndex),110);
+      if(truck.loaded>=truck.capacity)setTimeout(()=>startDeparture(slotIndex),520);
       wrapped=[null,null,null,null]; // the departing row leaves a real travelling gap
     }
   }
