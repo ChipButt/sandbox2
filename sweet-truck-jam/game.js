@@ -111,6 +111,28 @@ function canDriveOut(t,trucks){
 function initialClearCount(trucks){return trucks.filter(t=>canDriveOut(t,trucks)).length}
 function removalOrder(trucks,r){const rem=trucks.map(t=>({...t})),out=[];while(rem.length){const free=rem.filter(t=>canDriveOut(t,rem));if(!free.length)return null;const t=choice(r,free);out.push(t.id);rem.splice(rem.findIndex(x=>x.id===t.id),1)}return out}
 
+function validateGeneratedLevel(gen){
+  if(!gen||!Array.isArray(gen.trucks)||!Array.isArray(gen.order)||gen.trucks.length!==gen.order.length)return false;
+  if(gen.trucks.some(t=>t.capacity<=0||t.capacity%4!==0))return false;
+
+  const remaining=gen.trucks.map(t=>({...t}));
+  for(const id of gen.order){
+    const idx=remaining.findIndex(t=>t.id===id);
+    if(idx<0||!canDriveOut(remaining[idx],remaining))return false;
+    remaining.splice(idx,1);
+  }
+  if(remaining.length)return false;
+
+  const q=makeQueue(gen);
+  if(q.length%4!==0)return false;
+  for(let i=0;i<q.length;i+=4){
+    if(q.slice(i,i+4).length!==4)return false;
+    const c=q[i].color;
+    if(q.slice(i,i+4).some(x=>x.color!==c))return false;
+  }
+  return q.length===gen.trucks.reduce((sum,t)=>sum+t.capacity,0);
+}
+
 function generateLevel(n){
   for(let attempt=0;attempt<180;attempt++){
     const R=rng(n*73471+attempt*977+19),count=Math.min(17+Math.floor(n*.35),22),trucks=[];
@@ -120,7 +142,7 @@ function generateLevel(n){
         const kind=R()<.18?2:R()<.55?1:0;
         const length=[48,59,72][kind],width=[25,27,29][kind];
         const a=choice(R,[0,Math.PI/4,Math.PI/2,3*Math.PI/4,Math.PI,5*Math.PI/4,3*Math.PI/2,7*Math.PI/4]);
-        const t={id:`t${i}`,x:rint(R,JAM.x+34,JAM.x+JAM.w-34),y:rint(R,JAM.y+34,JAM.y+JAM.h-34),angle:a,length,width,capacity:[20,26,34][kind],kind,color:'red'};
+        const t={id:`t${i}`,x:rint(R,JAM.x+34,JAM.x+JAM.w-34),y:rint(R,JAM.y+34,JAM.y+JAM.h-34),angle:a,length,width,capacity:[20,28,36][kind],kind,color:'red'};
         const poly=truckPoly(t); if(poly.some(p=>p.x<JAM.x+4||p.x>JAM.x+JAM.w-4||p.y<JAM.y+4||p.y>JAM.y+JAM.h-4))continue;
         if(trucks.some(o=>polyOverlap(poly,truckPoly(o))))continue; trucks.push(t);placed=true;
       }
@@ -131,26 +153,65 @@ function generateLevel(n){
     const palette=COLOR_NAMES.slice(0,Math.min(5+Math.floor(n/5),8));
     const colorPlan=[]; for(let i=0;i<order.length;i++){let c=choice(R,palette);if(i>0&&c===colorPlan[i-1]&&R()<.7)c=choice(R,palette.filter(x=>x!==c));colorPlan.push(c)}
     const byId=new Map(trucks.map(t=>[t.id,t])); order.forEach((id,i)=>byId.get(id).color=colorPlan[i]);
-    return{trucks,order};
+    const gen={trucks,order};
+    if(validateGeneratedLevel(gen))return gen;
   }
   return fallbackLevel(n);
 }
 function fallbackLevel(n){
-  const data=[
-    [70,555,0,0],[140,552,Math.PI/2,1],[208,552,Math.PI/4,0],[292,555,Math.PI,1],[350,570,Math.PI/2,0],
-    [82,635,Math.PI/2,1],[150,628,0,0],[220,632,Math.PI,2],[306,630,3*Math.PI/4,0],[355,650,Math.PI/2,1],
-    [65,735,0,2],[150,724,7*Math.PI/4,0],[235,725,Math.PI/2,1],[320,730,Math.PI,1]
-  ];
-  const r=rng(n*91+4);const trucks=data.map((a,i)=>{const kind=a[3],t={id:`t${i}`,x:a[0],y:a[1],angle:a[2],kind,length:[48,59,72][kind],width:[25,27,29][kind],capacity:[20,26,34][kind],color:choice(r,COLOR_NAMES.slice(0,5))};return t});
-  const order=removalOrder(trucks,r)||trucks.map(t=>t.id);return{trucks,order};
+  const R=rng(n*91+4);
+  const ys=[540,575,610,645,680,715,750,785];
+  const trucks=ys.map((y,i)=>{
+    const kind=i%3;
+    const left=i%2===0;
+    return{
+      id:`t${i}`,
+      x:left?82:338,
+      y,
+      angle:left?Math.PI:0,
+      kind,
+      length:[48,59,72][kind],
+      width:[25,27,29][kind],
+      capacity:[20,28,36][kind],
+      color:choice(R,COLOR_NAMES.slice(0,5))
+    };
+  });
+  const order=removalOrder(trucks,R);
+  if(!order)throw new Error('Guaranteed fallback unexpectedly unsolvable');
+  const gen={trucks,order};
+  if(!validateGeneratedLevel(gen))throw new Error('Fallback validation failed');
+  return gen;
 }
-function makeQueue(gen){const by=new Map(gen.trucks.map(t=>[t.id,t])),q=[];let cid=0;for(const id of gen.order){const t=by.get(id);for(let i=0;i<t.capacity;i++)q.push({id:`c${cid++}`,color:t.color,visualIndex:q.length,entryT:1})}return q}
+function makeQueue(gen){
+  const by=new Map(gen.trucks.map(t=>[t.id,t])),q=[];let cid=0;
+  for(const id of gen.order){
+    const t=by.get(id);
+    if(!t||t.capacity%4!==0)throw new Error('Invalid truck capacity for 4-sweet rows');
+    for(let i=0;i<t.capacity;i++)q.push({id:`c${cid++}`,color:t.color,visualIndex:q.length,entryT:1});
+  }
+  return q;
+}
+function rowsAreValid(list){
+  if(list.length%4!==0)return false;
+  for(let i=0;i<list.length;i+=4){
+    const row=list.slice(i,i+4);
+    if(row.length!==4||row.some(c=>c.color!==row[0].color))return false;
+  }
+  return true;
+}
 function splitSweetPools(gen){
   const all=makeQueue(gen);
-  const rotation=all.splice(0,Math.min(ROTATION_CAPACITY,all.length));
+  if(!rowsAreValid(all))throw new Error('Generated sweets do not form complete four-sweet rows');
+
+  const rotationCount=Math.min(ROTATION_CAPACITY,all.length);
+  const rotation=all.splice(0,rotationCount);
   rotation.forEach((c,i)=>{c.visualIndex=i;c.entryT=1});
-  const leftCount=Math.ceil(all.length/2);
-  const leftFeed=all.splice(0,leftCount),rightFeed=all;
+
+  const remainingRows=all.length/4;
+  const leftRows=Math.ceil(remainingRows/2);
+  const leftFeed=all.splice(0,leftRows*4),rightFeed=all;
+
+  if(!rowsAreValid(rotation)||!rowsAreValid(leftFeed)||!rowsAreValid(rightFeed))throw new Error('Sweet pool row integrity failed');
   return{rotation,leftFeed,rightFeed};
 }
 function makeSlots(){
@@ -163,18 +224,28 @@ function newState(n){
 }
 function sweetsRemaining(){return state.rotation.length+state.leftFeed.length+state.rightFeed.length}
 function refillRotation(){
-  while(state.rotation.length<ROTATION_CAPACITY&&(state.leftFeed.length||state.rightFeed.length)){
-    const source=state.leftFeed.length?state.leftFeed:state.rightFeed;
-    const side=state.leftFeed.length?'left':'right';
-    const c=source.shift();
-    const fp=feederPos(side,0);
-    c.visualIndex=state.rotation.length;
-    c.entryT=0;
-    c.entryFrom={x:fp.x,y:fp.y};
-    state.rotation.push(c);
+  while(state.rotation.length<=ROTATION_CAPACITY-4&&(state.leftFeed.length>=4||state.rightFeed.length>=4)){
+    const useLeft=state.leftFeed.length>=4;
+    const source=useLeft?state.leftFeed:state.rightFeed;
+    const side=useLeft?'left':'right';
+    const row=source.splice(0,4);
+    if(row.length!==4||row.some(c=>c.color!==row[0].color))throw new Error('Feeder supplied an invalid row');
+
+    const baseIndex=state.rotation.length;
+    for(let i=0;i<4;i++){
+      const c=row[i],fp=feederPos(side,i);
+      c.visualIndex=baseIndex+i;
+      c.entryT=0;
+      c.entryFrom={x:fp.x,y:fp.y};
+      state.rotation.push(c);
+    }
   }
 }
-function start(n){level=n;state=newState(n);overlay.classList.add('hidden');saveLevel();showToast('Tap a truck with a clear path');}
+function start(n){
+  level=n;state=newState(n);
+  if(!rowsAreValid(state.rotation)||!rowsAreValid(state.leftFeed)||!rowsAreValid(state.rightFeed))throw new Error('Level started with an invalid sweet row');
+  overlay.classList.add('hidden');saveLevel();showToast('Tap a truck with a clear path');
+}
 function saveLevel(){try{localStorage.setItem('sweet-fever-level',String(level))}catch(_){}}
 
 function drawBackground(){
@@ -320,22 +391,48 @@ function finishMotion(m){
     const s=state.slots[m.slot];s.truck=null;beginBoardingIfPossible();checkEnd();
   }
 }
+function frontRowColor(){
+  if(state.rotation.length<4)return null;
+  const row=state.rotation.slice(0,4);
+  return row.every(c=>c.color===row[0].color)?row[0].color:null;
+}
 function beginBoardingIfPossible(){
-  if(state.boarding||!state.rotation.length)return;
-  const color=state.rotation[0].color;
-  const idx=state.slots.findIndex(s=>s.truck&&s.truck.color===color&&(s.truck.loaded||0)<s.truck.capacity);
+  if(state.boarding)return;
+  const rowColor=frontRowColor();
+  if(!rowColor)return;
+  const idx=state.slots.findIndex(s=>s.truck&&s.truck.color===rowColor&&((s.truck.loaded||0)+4)<=s.truck.capacity);
   if(idx>=0)state.boarding={slot:idx,timer:.18};
 }
 function updateBoarding(dt){
   if(!state.boarding){beginBoardingIfPossible();return}
   const b=state.boarding,s=state.slots[b.slot],t=s?.truck;if(!t){state.boarding=null;return}
-  if(!state.rotation.length||state.rotation[0].color!==t.color){state.boarding=null;return}
-  b.timer-=dt;if(b.timer>0)return;b.timer=.12;
-  const c=state.rotation.shift();const cp=candyPos(c.visualIndex);
-  state.particles.push({color:c.color,sx:cp.x,sy:cp.y,cx:lerp(cp.x,s.x,.55),cy:Math.min(cp.y,s.y)-24,tx:s.x,ty:s.y-8,t:0,duration:.32});
-  t.loaded=(t.loaded||0)+1;
+
+  const rowColor=frontRowColor();
+  if(!rowColor||rowColor!==t.color){state.boarding=null;return}
+
+  b.timer-=dt;if(b.timer>0)return;b.timer=.16;
+
+  const row=state.rotation.slice(0,4);
+  if(row.length!==4||row.some(c=>c.color!==rowColor)){state.boarding=null;return}
+
+  for(let i=0;i<4;i++){
+    const c=row[i],cp=candyPos(c.visualIndex);
+    const lateral=(i-1.5)*4.5;
+    state.particles.push({
+      color:c.color,
+      sx:cp.x,sy:cp.y,
+      cx:lerp(cp.x,s.x,.55)+lateral,
+      cy:Math.min(cp.y,s.y)-24,
+      tx:s.x+lateral,ty:s.y-8,
+      t:0,duration:.34
+    });
+  }
+
+  state.rotation.splice(0,4);
+  t.loaded=(t.loaded||0)+4;
   refillRotation();
-  if(t.loaded>=t.capacity){state.boarding=null;setTimeout(()=>startDeparture(b.slot),90)}
+
+  if(t.loaded>=t.capacity){state.boarding=null;setTimeout(()=>startDeparture(b.slot),110)}
 }
 function startDeparture(slotIndex){
   if(!state||state.won||state.lost)return;const s=state.slots[slotIndex],t=s?.truck;if(!t)return;s.truck=null;
@@ -345,7 +442,10 @@ function startDeparture(slotIndex){
 function checkEnd(){
   if(sweetsRemaining()===0&&state.yard.length===0&&state.slots.every(s=>!s.truck)&&state.motions.length===0){state.won=true;showResult(true);return}
   const active=state.slots.filter(s=>s.active),full=active.every(s=>s.truck);
-  if(full&&state.rotation.length){const c=state.rotation[0].color;if(!active.some(s=>s.truck&&s.truck.color===c)){state.lost=true;showResult(false)}}
+  if(full&&state.rotation.length){
+    const c=frontRowColor();
+    if(c&&!active.some(s=>s.truck&&s.truck.color===c)){state.lost=true;showResult(false)}
+  }
 }
 
 function dispatchTruck(t){
@@ -377,7 +477,7 @@ function handleTap(x,y){
   if(locked&&!locked.active&&Math.abs(x-locked.x)<=locked.w*.7&&Math.abs(y-locked.y)<=locked.h*.65)return unlockSlot();
   const t=hitTruck(x,y);if(t)dispatchTruck(t);
 }
-function autoMove(){if(state.boosters.auto<=0){showToast('No AUTO boosts left');return}const targetColor=state.rotation[0]?.color;const candidates=state.yard.filter(t=>t.color===targetColor&&canDriveOut(t,state.yard));if(!candidates.length){showToast('No matching clear truck');return}state.boosters.auto--;dispatchTruck(candidates[0])}
+function autoMove(){if(state.boosters.auto<=0){showToast('No AUTO boosts left');return}const targetColor=frontRowColor();const candidates=state.yard.filter(t=>t.color===targetColor&&canDriveOut(t,state.yard));if(!candidates.length){showToast('No matching clear truck');return}state.boosters.auto--;dispatchTruck(candidates[0])}
 function unlockSlot(){
   const s=state.slots[4];
   if(!s||s.active){showToast('Fifth parking slot already open');return}
@@ -385,13 +485,22 @@ function unlockSlot(){
   state.coins-=100;s.active=true;showToast('Fifth parking slot opened');
 }
 function shuffleGroups(){
-  if(state.boosters.shuffle<=0||state.rotation.length<2){showToast('No shuffle available');return}
-  state.boosters.shuffle--;const groups=[];let i=0;
-  while(i<state.rotation.length){const c=state.rotation[i].color,g=[];while(i<state.rotation.length&&state.rotation[i].color===c)g.push(state.rotation[i++]);groups.push(g)}
-  for(let j=groups.length-1;j>1;j--){const k=1+Math.floor(Math.random()*j);[groups[j],groups[k]]=[groups[k],groups[j]]}
-  state.rotation=groups.flat();state.rotation.forEach((c,i)=>c.visualIndex=i);showToast('Current rotation shuffled');
-}
+  if(state.boosters.shuffle<=0||state.rotation.length<8){showToast('No shuffle available');return}
+  if(!rowsAreValid(state.rotation)){showToast('Rotation row error');return}
 
+  state.boosters.shuffle--;
+  const rows=[];
+  for(let i=0;i<state.rotation.length;i+=4)rows.push(state.rotation.slice(i,i+4));
+
+  // Keep the current playable row fixed; shuffle only later complete rows.
+  for(let j=rows.length-1;j>1;j--){
+    const k=1+Math.floor(Math.random()*j);
+    [rows[j],rows[k]]=[rows[k],rows[j]];
+  }
+  state.rotation=rows.flat();
+  state.rotation.forEach((c,i)=>c.visualIndex=i);
+  showToast('Current rotation rows shuffled');
+}
 function showToast(msg){toast.textContent=msg;toast.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.classList.remove('show'),1300)}
 function showResult(win){overlay.classList.remove('hidden');overlayBadge.textContent=win?'✓':'!';overlayBadge.style.background=win?'#e4f7eb':'#ffe8e8';overlayBadge.style.color=win?'#2b9f5d':'#d14e4e';overlayTitle.textContent=win?'DELIVERED!':'PARKING FULL';overlayText.textContent=win?'Every sweet has been loaded and sent for delivery.':'The parking area is full and none of the parked trucks can take the next colour in the centre rotation.';overlayPrimary.textContent=win?'NEXT LEVEL':'TRY AGAIN';overlayPrimary.onclick=()=>start(win?level+1:level);overlaySecondary.onclick=()=>start(level)}
 function cap(s){return s.charAt(0).toUpperCase()+s.slice(1)}
