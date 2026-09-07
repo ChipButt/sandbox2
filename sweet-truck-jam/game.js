@@ -24,11 +24,14 @@ let candyPath=[];
 const ROTATION_CAPACITY=144;
 const ROTATION_COLS=4;
 const FEEDER_COLS=4;
-const ROTATION_SPEED_ROWS=4.5;
+const ROTATION_SPEED_ROWS=3.1;
 const LOOP_ROWS=ROTATION_CAPACITY/ROTATION_COLS;
 if(LOOP_ROWS>36)throw new Error('Central rotation may not exceed 36 rows');
-const LEFT_JOIN_ROW=7;
-const RIGHT_JOIN_ROW=29;
+const LEFT_JOIN_ROW=0;
+const RIGHT_JOIN_ROW=14;
+const OUTLET_ROW=5;
+const OUTLET_SOURCE_ROW=(OUTLET_ROW-1+LOOP_ROWS)%LOOP_ROWS;
+const LOAD_MOUTH={x:210,y:344};
 const pointer={x:0,y:0};
 
 function resize(){
@@ -56,55 +59,82 @@ function text(s,x,y,size,fill='#fff',align='center',weight=900){ctx.fillStyle=fi
 
 function makeCandyPath(){
   const pts=[];
-  // Compact central conveyor loop. This is intentionally smaller than the
-  // feeder stacks so the preview queues read as separate incoming supplies.
+  // Compact irregular loop: broad lower sweep, right-hand return and inner hook,
+  // matching the reference layout much more closely than an oval ring.
   const segs=[
-    [[210,316],[178,319],[145,304],[134,264]],
-    [[134,264],[122,214],[126,151],[154,116]],
-    [[154,116],[182,88],[238,88],[267,112]],
-    [[267,112],[294,138],[298,199],[289,248]],
-    [[289,248],[282,290],[247,314],[210,316]]
+    [[132,238],[175,238],[175,305],[210,305]],
+    [[210,305],[270,305],[315,295],[315,255]],
+    [[315,255],[315,230],[330,197],[288,197]],
+    [[288,197],[235,197],[270,105],[220,105]],
+    [[220,105],[185,105],[155,105],[155,125]],
+    [[155,125],[155,150],[145,170],[155,185]],
+    [[155,185],[180,185],[210,185],[235,185]],
+    [[235,185],[235,200],[245,215],[235,225]],
+    [[235,225],[200,240],[110,238],[132,238]]
   ];
-  for(const seg of segs){for(let i=0;i<40;i++){const t=i/40,mt=1-t;pts.push({x:mt*mt*mt*seg[0][0]+3*mt*mt*t*seg[1][0]+3*mt*t*t*seg[2][0]+t*t*t*seg[3][0],y:mt*mt*mt*seg[0][1]+3*mt*mt*t*seg[1][1]+3*mt*t*t*seg[2][1]+t*t*t*seg[3][1]})}}
-  pts.push({x:210,y:322});
-  const dense=[]; let carry=0,prev=pts[0]; dense.push(prev);
+  for(const seg of segs){
+    for(let i=0;i<40;i++){
+      const t=i/40,mt=1-t;
+      pts.push({
+        x:mt*mt*mt*seg[0][0]+3*mt*mt*t*seg[1][0]+3*mt*t*t*seg[2][0]+t*t*t*seg[3][0],
+        y:mt*mt*mt*seg[0][1]+3*mt*mt*t*seg[1][1]+3*mt*t*t*seg[2][1]+t*t*t*seg[3][1]
+      });
+    }
+  }
+  pts.push({x:132,y:238});
+  const dense=[];let carry=0,prev=pts[0];dense.push(prev);
   for(let i=1;i<pts.length;i++){
-    const p=pts[i],dx=p.x-prev.x,dy=p.y-prev.y,d=Math.hypot(dx,dy); carry+=d;
-    if(carry>=9){dense.push(p);carry=0} prev=p;
+    const p=pts[i],d=Math.hypot(p.x-prev.x,p.y-prev.y);carry+=d;
+    if(carry>=9){dense.push(p);carry=0}
+    prev=p;
   }
   return dense;
 }
 candyPath=makeCandyPath();
 
-function candyPos(index,phase=state?.rotationPhase||0){
-  const row=Math.floor(index/ROTATION_COLS),col=index%ROTATION_COLS;
+function loopPose(row,phase=state?.rotationPhase||0){
   const rowProgress=((row+phase)%LOOP_ROWS+LOOP_ROWS)%LOOP_ROWS;
-  const pathProgress=rowProgress/LOOP_ROWS;
-  const exact=pathProgress*(candyPath.length-1);
+  const exact=(rowProgress/LOOP_ROWS)*(candyPath.length-1);
   const i0=Math.floor(exact),i1=(i0+1)%candyPath.length,t=exact-i0;
   const p0=candyPath[i0]||candyPath[0],p1=candyPath[i1]||candyPath[0];
   const x=lerp(p0.x,p1.x,t),y=lerp(p0.y,p1.y,t);
-  let dx=p1.x-p0.x,dy=p1.y-p0.y;let len=Math.hypot(dx,dy)||1;dx/=len;dy/=len;
-  const nx=-dy,ny=dx;const off=(col-(ROTATION_COLS-1)/2)*10.8;
-  return{x:x+nx*off,y:y+ny*off};
+  let tx=p1.x-p0.x,ty=p1.y-p0.y;const len=Math.hypot(tx,ty)||1;tx/=len;ty/=len;
+  return{x,y,tx,ty,nx:-ty,ny:tx};
+}
+function candyPos(index,phase=state?.rotationPhase||0){
+  const row=Math.floor(index/ROTATION_COLS),col=index%ROTATION_COLS,p=loopPose(row,phase);
+  const off=(col-(ROTATION_COLS-1)/2)*10.8;
+  return{x:p.x+p.nx*off,y:p.y+p.ny*off};
+}
+function feederGeometry(side){
+  const row=side==='left'?LEFT_JOIN_ROW:RIGHT_JOIN_ROW;
+  const join=loopPose(row,0);
+  const rise=side==='left'?54:50;
+  const startX=side==='left'?join.x-58:join.x+58;
+  const startY=join.y-rise;
+  return{
+    row,join,
+    start:{x:startX,y:startY},
+    c1:{x:startX,y:startY+34},
+    c2:{x:join.x-join.tx*36,y:join.y-join.ty*36}
+  };
 }
 function feederPos(side,index){
-  const row=Math.floor(index/FEEDER_COLS),col=index%FEEDER_COLS;
-  // Four-wide preview stacks continue upward beyond the visible screen. Only
-  // the nearer upcoming rows are visible; deeper level contents stay hidden.
-  const centreX=side==='left'?38:382;
-  const y=286-row*12.8;
+  const row=Math.floor(index/FEEDER_COLS),col=index%FEEDER_COLS,g=feederGeometry(side);
   const off=(col-(FEEDER_COLS-1)/2)*8.6;
-  return{x:centreX+off,y};
+  return{x:g.start.x+off,y:g.start.y-row*12.8};
 }
-function feederJoin(side,col){
-  const row=side==='left'?LEFT_JOIN_ROW:RIGHT_JOIN_ROW;
-  return candyPos(row*ROTATION_COLS+col,0);
-}
-function feederControl(side,col){
-  const start=feederPos(side,col),join=feederJoin(side,col);
-  // Gentle, shallow merge rather than a sharp curved launch.
-  return{x:side==='left'?88:332,y:lerp(start.y,join.y,.66)};
+function feederEntryPoint(side,col,u,targetIndex){
+  const from=feederPos(side,col),to=candyPos(targetIndex);
+  const row=Math.floor(targetIndex/ROTATION_COLS),lp=loopPose(row);
+  const q=1-u;
+  // Vertical start tangent + loop end tangent = a natural rounded ~90° turn.
+  const c1={x:from.x,y:from.y+34};
+  const c2={x:to.x-lp.tx*36,y:to.y-lp.ty*36};
+  return{
+    x:q*q*q*from.x+3*q*q*u*c1.x+3*q*u*u*c2.x+u*u*u*to.x,
+    y:q*q*q*from.y+3*q*q*u*c1.y+3*q*u*u*c2.y+u*u*u*to.y
+  };
 }
 
 function truckPoly(t,x=t.x,y=t.y,angle=t.angle){
@@ -265,11 +295,9 @@ function insertFeederRow(rowIndex,side){
 
   const base=rowIndex*ROTATION_COLS;
   for(let i=0;i<4;i++){
-    const c=row[i],fp=feederPos(side,i);
+    const c=row[i];
     c.entryT=0;
-    c.entryFrom={x:fp.x,y:fp.y};
-    c.entryControl=feederControl(side,i);
-    c.entryJoin=feederJoin(side,i);
+    c.entrySide=side;
     state.rotation[base+i]=c;
   }
   return true;
@@ -298,32 +326,48 @@ function drawBackground(){
 }
 function drawCrowdTrack(){
   ctx.save();ctx.lineCap='round';ctx.lineJoin='round';
-  // central rotation track
-  ctx.beginPath();candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.strokeStyle='#aebbc4';ctx.lineWidth=52;ctx.stroke();
-  ctx.beginPath();candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.strokeStyle='#f7fafc';ctx.lineWidth=46;ctx.stroke();
-  ctx.beginPath();candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.strokeStyle='#d6e0e6';ctx.lineWidth=40;ctx.stroke();
 
-  // Four-wide feeder lanes connect into the centre loop through empty curved
-  // junctions. Waiting feeder sweets stop before the junction, so they never overlap
-  // the circulating sweets; only an actively transferred row crosses the connector.
+  for(const stroke of [
+    {w:52,c:'#aebbc4'},
+    {w:46,c:'#f7fafc'},
+    {w:40,c:'#d6e0e6'}
+  ]){
+    ctx.beginPath();
+    candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+    ctx.closePath();ctx.strokeStyle=stroke.c;ctx.lineWidth=stroke.w;ctx.stroke();
+  }
+
+  // The feeders are true branches of the loop: vertical queues meeting the
+  // circulation path through one smooth 90-degree bend.
   for(const side of ['left','right']){
-    const x=side==='left'?38:382;
-    const join=side==='left'?{x:112,y:265}:{x:308,y:252};
-    const control=side==='left'?{x:72,y:284}:{x:348,y:278};
+    const g=feederGeometry(side);
     for(const stroke of [
       {w:40,c:'#aebbc4'},
       {w:36,c:'#f7fafc'},
       {w:32,c:'#d6e0e6'}
     ]){
       ctx.beginPath();
-      ctx.moveTo(x,22);
-      ctx.lineTo(x,300);
-      ctx.quadraticCurveTo(control.x,control.y,join.x,join.y);
+      ctx.moveTo(g.start.x,-70);
+      ctx.lineTo(g.start.x,g.start.y);
+      ctx.bezierCurveTo(g.c1.x,g.c1.y,g.c2.x,g.c2.y,g.join.x,g.join.y);
       ctx.strokeStyle=stroke.c;ctx.lineWidth=stroke.w;ctx.stroke();
     }
   }
+
+  // Narrow single-file loading spur, as in the reference.
+  const outlet=loopPose(OUTLET_ROW,0);
+  for(const stroke of [
+    {w:29,c:'#aebbc4'},
+    {w:25,c:'#f7fafc'},
+    {w:20,c:'#778798'}
+  ]){
+    ctx.beginPath();
+    ctx.moveTo(outlet.x,outlet.y);
+    ctx.bezierCurveTo(outlet.x,325,LOAD_MOUTH.x,330,LOAD_MOUTH.x,352);
+    ctx.strokeStyle=stroke.c;ctx.lineWidth=stroke.w;ctx.stroke();
+  }
+
   ctx.restore();
-  roundedRect(185,317,50,43,15,'#778798','#f7fafc',4);
 }
 function drawParkingApron(){
   ctx.save();ctx.beginPath();ctx.moveTo(8,366);ctx.quadraticCurveTo(18,352,38,352);ctx.lineTo(382,352);ctx.quadraticCurveTo(402,352,412,366);ctx.lineTo(420,487);ctx.lineTo(0,487);ctx.closePath();ctx.fillStyle='#85899c';ctx.fill();ctx.strokeStyle='#f4f7f9';ctx.lineWidth=4;ctx.stroke();ctx.restore();
@@ -363,9 +407,13 @@ function drawCandy(c,index){
 }
 function drawFeederCandy(c,side,index,dt){
   if(c.feedVisualIndex==null)c.feedVisualIndex=index;
-  c.feedVisualIndex+=(index-c.feedVisualIndex)*Math.min(1,dt*4.2);
+  c.feedVisualIndex+=(index-c.feedVisualIndex)*Math.min(1,dt*4.6);
   const p=feederPos(side,c.feedVisualIndex),col=COLORS[c.color];
-  ctx.save();ctx.translate(p.x,p.y);ctx.beginPath();ctx.arc(1.4,2.1,5.1,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.17)';ctx.fill();ctx.beginPath();ctx.arc(0,0,5,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();ctx.beginPath();ctx.arc(-1.6,-1.7,1.45,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.43)';ctx.fill();ctx.restore();
+  ctx.save();ctx.translate(p.x,p.y);
+  ctx.beginPath();ctx.arc(1.4,2.1,5.1,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.17)';ctx.fill();
+  ctx.beginPath();ctx.arc(0,0,5,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();
+  ctx.beginPath();ctx.arc(-1.6,-1.7,1.45,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.43)';ctx.fill();
+  ctx.restore();
 }
 function drawQueue(dt){
   for(let i=state.leftFeed.length-1;i>=0;i--)drawFeederCandy(state.leftFeed[i],'left',i,dt);
@@ -375,21 +423,20 @@ function drawQueue(dt){
     const c=state.rotation[i];
     if(!c)continue;
 
-    if(c.entryT<1)c.entryT=Math.min(1,c.entryT+dt*1.18);
-    if(c.entryT<1&&c.entryFrom){
-      const to=candyPos(i),u=ease(c.entryT),q=1-u;
-      const c1=c.entryControl||c.entryFrom;
-      const join=c.entryJoin||to;
-      // One continuous cubic path from feeder stack into the moving loop gap.
-      // No mid-animation segment switch, so the row stays smooth and coherent.
-      const c2={x:lerp(join.x,to.x,.42),y:lerp(join.y,to.y,.42)};
-      const x=q*q*q*c.entryFrom.x+3*q*q*u*c1.x+3*q*u*u*c2.x+u*u*u*to.x;
-      const y=q*q*q*c.entryFrom.y+3*q*q*u*c1.y+3*q*u*u*c2.y+u*u*u*to.y;
-      const col=COLORS[c.color];ctx.save();ctx.translate(x,y);ctx.beginPath();ctx.arc(0,0,5.2,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();ctx.restore();
+    if(c.entryT<1)c.entryT=Math.min(1,c.entryT+dt*.82);
+    let p;
+    if(c.entryT<1&&c.entrySide){
+      p=feederEntryPoint(c.entrySide,i%4,ease(c.entryT),i);
     }else{
-      const p=candyPos(i),col=COLORS[c.color];
-      ctx.save();ctx.translate(p.x,p.y);ctx.beginPath();ctx.arc(1.5,2.3,5.3,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.18)';ctx.fill();ctx.beginPath();ctx.arc(0,0,5.2,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();ctx.beginPath();ctx.arc(-1.7,-1.8,1.6,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.45)';ctx.fill();ctx.restore();
+      p=candyPos(i);
     }
+
+    const col=COLORS[c.color];
+    ctx.save();ctx.translate(p.x,p.y);
+    ctx.beginPath();ctx.arc(1.5,2.3,5.3,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.18)';ctx.fill();
+    ctx.beginPath();ctx.arc(0,0,5.2,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();
+    ctx.beginPath();ctx.arc(-1.7,-1.8,1.6,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.45)';ctx.fill();
+    ctx.restore();
   }
 }
 
@@ -432,18 +479,60 @@ function drawYard(){
 function drawSlotsAndParked(){
   for(let i=0;i<state.slots.length;i++){const s=state.slots[i],t=s.truck;if(!t)continue;drawTruck(t,s.x,s.y,-Math.PI/2,true);const left=t.capacity-(t.loaded||0);text(String(left),s.x,s.y+s.h/2+13,14,'#ffd743','center',1000);ctx.strokeStyle='rgba(66,50,20,.25)'}
 }
-function drawMotions(){for(const m of state.motions){const p=motionPose(m);drawTruck(m.truck,p.x,p.y,p.a,true)}}
+function buildSmoothRoute(points){
+  const clean=[];
+  for(const p of points){
+    const last=clean[clean.length-1];
+    if(!last||Math.hypot(p.x-last.x,p.y-last.y)>2)clean.push(p);
+  }
+  const samples=[];
+  const steps=12;
+  for(let i=0;i<clean.length-1;i++){
+    const p0=clean[Math.max(0,i-1)],p1=clean[i],p2=clean[i+1],p3=clean[Math.min(clean.length-1,i+2)];
+    for(let j=0;j<steps;j++){
+      const t=j/steps,t2=t*t,t3=t2*t;
+      const x=.5*((2*p1.x)+(-p0.x+p2.x)*t+(2*p0.x-5*p1.x+4*p2.x-p3.x)*t2+(-p0.x+3*p1.x-3*p2.x+p3.x)*t3);
+      const y=.5*((2*p1.y)+(-p0.y+p2.y)*t+(2*p0.y-5*p1.y+4*p2.y-p3.y)*t2+(-p0.y+3*p1.y-3*p2.y+p3.y)*t3);
+      samples.push({x,y});
+    }
+  }
+  samples.push(clean[clean.length-1]);
+  let total=0;
+  for(let i=0;i<samples.length;i++){
+    if(i)total+=Math.hypot(samples[i].x-samples[i-1].x,samples[i].y-samples[i-1].y);
+    samples[i].d=total;
+  }
+  return{samples,total};
+}
+function sampleRoute(route,u){
+  const target=clamp(u,0,1)*route.total,a=route.samples;
+  let i=1;
+  while(i<a.length&&a[i].d<target)i++;
+  i=Math.min(i,a.length-1);
+  const p0=a[Math.max(0,i-1)],p1=a[i],span=Math.max(.001,p1.d-p0.d),v=clamp((target-p0.d)/span,0,1);
+  const x=lerp(p0.x,p1.x,v),y=lerp(p0.y,p1.y,v);
+  const prev=a[Math.max(0,i-2)],next=a[Math.min(a.length-1,i+1)];
+  return{x,y,a:Math.atan2(next.y-prev.y,next.x-prev.x)};
+}
+function drawMotions(){
+  for(const m of state.motions){
+    const p=motionPose(m);
+    drawTruck(m.truck,p.x,p.y,p.a,true);
+  }
+}
 function motionPose(m){
   const t=clamp(m.t/m.duration,0,1);
-  if(m.type==='dispatch'){
-    if(t<.38){const u=ease(t/.38);return{x:lerp(m.sx,m.ex,u),y:lerp(m.sy,m.ey,u),a:m.sa}}
-    const u=easeOut((t-.38)/.62),q=1-u;return{x:q*q*m.ex+2*q*u*m.cx+u*u*m.tx,y:q*q*m.ey+2*q*u*m.cy+u*u*m.ty,a:angleLerp(m.sa,-Math.PI/2,u)}
+  if(m.route){
+    const p=sampleRoute(m.route,ease(t));
+    if(m.type==='depart'&&t<m.reverseUntil){
+      const blend=clamp((t-(m.reverseUntil-.12))/.12,0,1);
+      p.a=angleLerp(-Math.PI/2,p.a,blend);
+    }
+    return p;
   }
-  if(m.type==='depart'){
-    const u=easeOut(t);return{x:lerp(m.sx,m.tx,u),y:lerp(m.sy,m.ty,u),a:angleLerp(-Math.PI/2,0,u)}
-  }
-  return{x:m.sx,y:m.sy,a:m.sa}
+  return{x:m.sx,y:m.sy,a:m.sa};
 }
+
 function drawParticles(){
   for(const p of state.particles){
     const local=p.t-(p.delay||0);
@@ -470,21 +559,28 @@ function update(dt){
   }
   for(const m of state.motions)m.t+=dt;
   for(let i=state.motions.length-1;i>=0;i--){const m=state.motions[i];if(m.t>=m.duration){state.motions.splice(i,1);finishMotion(m)}}
-  for(const p of state.particles)p.t+=dt;state.particles=state.particles.filter(p=>p.t<(p.delay||0)+p.duration);
+  for(const p of state.particles){
+    p.t+=dt;
+    if(p.kind==='load'&&!p.arrived&&p.t>=(p.delay||0)+p.duration){
+      p.arrived=true;
+      completeSweetLoad(p);
+    }
+  }
+  state.particles=state.particles.filter(p=>p.t<(p.delay||0)+p.duration+.03);
 
   updateRotationConveyor(dt);
 }
 function finishMotion(m){
   if(m.type==='dispatch'){
-    const s=state.slots[m.slot];s.truck=m.truck;m.truck.loaded=0;m.truck.state='parked';
+    const s=state.slots[m.slot];s.truck=m.truck;m.truck.loaded=0;m.truck.pending=0;m.truck.departScheduled=false;m.truck.state='parked';
     if(!state.boarding)beginBoardingIfPossible();
   }else if(m.type==='depart'){
     const s=state.slots[m.slot];s.truck=null;beginBoardingIfPossible();checkEnd();
   }
 }
 function frontRowColor(){
-  // Next occupied row that will reach the outlet, ignoring travelling gaps.
-  for(let r=LOOP_ROWS-1;r>=0;r--){
+  for(let d=0;d<LOOP_ROWS;d++){
+    const r=(OUTLET_SOURCE_ROW-d+LOOP_ROWS)%LOOP_ROWS;
     const row=state.rotation.slice(r*4,r*4+4);
     if(row.every(c=>c==null))continue;
     if(row.some(c=>c==null)||row.some(c=>c.color!==row[0].color))throw new Error('Malformed loop row');
@@ -509,51 +605,90 @@ function updateRotationConveyor(dt){
   }
 }
 function advanceLoopOneRow(){
-  const base=(LOOP_ROWS-1)*ROTATION_COLS;
+  const base=OUTLET_SOURCE_ROW*ROTATION_COLS;
   const outletRow=state.rotation.slice(base,base+4);
   const isGap=outletRow.every(c=>c==null);
   if(!isGap&&(outletRow.some(c=>c==null)||outletRow.some(c=>c.color!==outletRow[0].color)))throw new Error('Invalid row reached outlet');
 
-  let wrapped=outletRow;
   if(!isGap){
     const rowColor=outletRow[0].color;
-    const slotIndex=state.slots.findIndex(s=>s.truck&&s.truck.color===rowColor&&((s.truck.loaded||0)+4)<=s.truck.capacity);
+    const slotIndex=state.slots.findIndex(s=>{
+      if(!s.truck||s.truck.color!==rowColor)return false;
+      const used=(s.truck.loaded||0)+(s.truck.pending||0);
+      return used+4<=s.truck.capacity;
+    });
 
     if(slotIndex>=0){
       const slot=state.slots[slotIndex],truck=slot.truck;
+      truck.pending=(truck.pending||0)+4;
+
       for(let i=0;i<4;i++){
-        const c=outletRow[i],cp=candyPos(base+i,1),lateral=(i-1.5)*4.5;
-        const tx=slot.x+lateral,ty=slot.y-8;
+        const c=outletRow[i],cp=candyPos(base+i,1);
         state.particles.push({
+          kind:'load',
+          slotIndex,
+          truckId:truck.id,
           color:c.color,
           sx:cp.x,sy:cp.y,
-          c1x:lerp(cp.x,tx,.32),c1y:lerp(cp.y,ty,.24),
-          c2x:lerp(cp.x,tx,.74),c2y:lerp(cp.y,ty,.78),
-          tx,ty,
+          c1x:LOAD_MOUTH.x,c1y:LOAD_MOUTH.y-12,
+          c2x:lerp(LOAD_MOUTH.x,slot.x,.52),c2y:lerp(LOAD_MOUTH.y,slot.y-10,.58),
+          tx:slot.x,ty:slot.y-10,
           t:0,
-          delay:i*.018,
-          duration:.56
+          delay:i*.055,
+          duration:.44
         });
       }
-      truck.loaded=(truck.loaded||0)+4;
-      if(truck.loaded>=truck.capacity)setTimeout(()=>startDeparture(slotIndex),520);
-      wrapped=[null,null,null,null]; // the departing row leaves a real travelling gap
+
+      for(let i=0;i<4;i++)state.rotation[base+i]=null;
     }
   }
 
-  // Advance every physical row one slot around the loop. The outlet row wraps to slot 0
-  // unless it was diverted to a truck, in which case a four-wide empty gap wraps instead.
-  state.rotation=[...wrapped,...state.rotation.slice(0,base)];
+  // Every row advances one physical position around the loop. Any removed row
+  // therefore becomes a real travelling 4-wide gap.
+  state.rotation=[
+    ...state.rotation.slice(state.rotation.length-ROTATION_COLS),
+    ...state.rotation.slice(0,state.rotation.length-ROTATION_COLS)
+  ];
 
-  // A feeder may fill the gap ONLY when that gap reaches its actual merge position.
   processFeederJunctions();
 
   if(!loopRowsAreValid(state.rotation))throw new Error('Rotation row integrity lost');
   checkEnd();
 }
+function completeSweetLoad(p){
+  const slot=state.slots[p.slotIndex],truck=slot?.truck;
+  if(!truck||truck.id!==p.truckId)return;
+  truck.loaded=(truck.loaded||0)+1;
+  truck.pending=Math.max(0,(truck.pending||0)-1);
+
+  if(truck.loaded>=truck.capacity&&truck.pending===0&&!truck.departScheduled){
+    truck.departScheduled=true;
+    setTimeout(()=>startDeparture(p.slotIndex),120);
+  }
+}
 function startDeparture(slotIndex){
-  if(!state||state.won||state.lost)return;const s=state.slots[slotIndex],t=s?.truck;if(!t)return;s.truck=null;
-  state.motions.push({type:'depart',truck:t,slot:slotIndex,sx:s.x,sy:s.y,sa:-Math.PI/2,tx:W+90,ty:360,t:0,duration:.55});
+  if(!state||state.won||state.lost)return;
+  const slot=state.slots[slotIndex],truck=slot?.truck;
+  if(!truck)return;
+
+  slot.truck=null;
+  const roadY=498;
+  const exitLeft=slot.x<W/2;
+  const points=[
+    {x:slot.x,y:slot.y},
+    {x:slot.x,y:roadY},
+    {x:exitLeft?-45:W+45,y:roadY}
+  ];
+  const route=buildSmoothRoute(points);
+  state.motions.push({
+    type:'depart',
+    truck,
+    slot:slotIndex,
+    route,
+    t:0,
+    duration:Math.max(.58,route.total/255),
+    reverseUntil:.34
+  });
   checkEnd();
 }
 function checkEnd(){
@@ -587,10 +722,39 @@ function dispatchTruck(t){
   const open=state.slots.findIndex(s=>s.active&&!s.truck&&!state.motions.some(m=>m.type==='dispatch'&&m.slot===state.slots.indexOf(s)));
   if(open<0){showToast('No free parking slot');return}
   if(!canDriveOut(t,state.yard)){blockedBump(t);return}
+
   state.yard=state.yard.filter(x=>x.id!==t.id);
-  const dir={x:Math.cos(t.angle),y:Math.sin(t.angle)};let d=0,ex=t.x,ey=t.y;while(d<520){d+=10;ex=t.x+dir.x*d;ey=t.y+dir.y*d;if(!insideJam(t,ex,ey))break}
-  const slot=state.slots[open],cx=clamp((ex+slot.x)/2+(slot.y-ey)*.18,30,W-30),cy=clamp(Math.min(ey,slot.y)-55,350,485);
-  state.motions.push({type:'dispatch',truck:t,slot:open,sx:t.x,sy:t.y,sa:t.angle,ex,ey,cx,cy,tx:slot.x,ty:slot.y,t:0,duration:.78});
+  const dir={x:Math.cos(t.angle),y:Math.sin(t.angle)};
+  let d=0,ex=t.x,ey=t.y;
+  while(d<520){
+    d+=8;ex=t.x+dir.x*d;ey=t.y+dir.y*d;
+    if(!insideJam(t,ex,ey))break;
+  }
+
+  const slot=state.slots[open],roadY=498,points=[{x:t.x,y:t.y},{x:ex,y:ey}];
+  const top=ey<JAM.y,left=ex<JAM.x,right=ex>JAM.x+JAM.w,bottom=ey>JAM.y+JAM.h;
+
+  if(top){
+    points.push({x:ex,y:roadY});
+  }else if(left){
+    points.push({x:JAM.x-18,y:ey},{x:JAM.x-18,y:roadY});
+  }else if(right){
+    points.push({x:JAM.x+JAM.w+18,y:ey},{x:JAM.x+JAM.w+18,y:roadY});
+  }else if(bottom){
+    const sideX=t.x<W/2?JAM.x-18:JAM.x+JAM.w+18;
+    points.push({x:t.x,y:JAM.y+JAM.h+18},{x:sideX,y:JAM.y+JAM.h+18},{x:sideX,y:roadY});
+  }
+
+  points.push({x:slot.x,y:roadY},{x:slot.x,y:slot.y});
+  const route=buildSmoothRoute(points);
+  state.motions.push({
+    type:'dispatch',
+    truck:t,
+    slot:open,
+    route,
+    t:0,
+    duration:Math.max(.62,route.total/260)
+  });
   navigator.vibrate?.(12);
 }
 function hitTruck(x,y){
