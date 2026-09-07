@@ -21,6 +21,9 @@ const overlaySecondary=document.getElementById('overlaySecondary');
 
 let dpr=1,scale=1,ox=0,oy=0,last=0,level=1,state=null,toastTimer=0;
 let candyPath=[];
+const ROTATION_CAPACITY=240;
+const ROTATION_COLS=5;
+const FEEDER_COLS=6;
 const pointer={x:0,y:0};
 
 function resize(){
@@ -67,12 +70,23 @@ function makeCandyPath(){
 candyPath=makeCandyPath();
 
 function candyPos(index){
-  const cols=7,row=Math.floor(index/cols),col=index%cols;
-  const p=candyPath[Math.min(row,candyPath.length-1)]||candyPath[candyPath.length-1];
-  const p2=candyPath[Math.min(row+1,candyPath.length-1)]||p;
+  const row=Math.floor(index/ROTATION_COLS),col=index%ROTATION_COLS;
+  const rows=Math.ceil(ROTATION_CAPACITY/ROTATION_COLS);
+  const progress=rows<=1?0:row/(rows-1);
+  const pi=Math.min(candyPath.length-1,Math.round(progress*(candyPath.length-1)));
+  const p=candyPath[pi]||candyPath[candyPath.length-1];
+  const p2=candyPath[Math.min(pi+1,candyPath.length-1)]||p;
   let dx=p2.x-p.x,dy=p2.y-p.y;let len=Math.hypot(dx,dy)||1;dx/=len;dy/=len;
-  const nx=-dy,ny=dx; const off=(col-(cols-1)/2)*8.4;
+  const nx=-dy,ny=dx; const off=(col-(ROTATION_COLS-1)/2)*10.6;
   return{x:p.x+nx*off,y:p.y+ny*off};
+}
+function feederPos(side,index){
+  const row=Math.floor(index/FEEDER_COLS),col=index%FEEDER_COLS;
+  const baseX=side==='left'?42:378;
+  const y=66+row*9.3;
+  const off=(col-(FEEDER_COLS-1)/2)*8.7;
+  const curve=Math.min(1,row/22);
+  return{x:baseX+off+(side==='left'?1:-1)*curve*16,y};
 }
 
 function truckPoly(t,x=t.x,y=t.y,angle=t.angle){
@@ -128,11 +142,36 @@ function fallbackLevel(n){
   const r=rng(n*91+4);const trucks=data.map((a,i)=>{const kind=a[3],t={id:`t${i}`,x:a[0],y:a[1],angle:a[2],kind,length:[48,59,72][kind],width:[25,27,29][kind],capacity:[20,26,34][kind],color:choice(r,COLOR_NAMES.slice(0,5))};return t});
   const order=removalOrder(trucks,r)||trucks.map(t=>t.id);return{trucks,order};
 }
-function makeQueue(gen){const by=new Map(gen.trucks.map(t=>[t.id,t])),q=[];let cid=0;for(const id of gen.order){const t=by.get(id);for(let i=0;i<t.capacity;i++)q.push({id:`c${cid++}`,color:t.color,visualIndex:q.length})}return q}
-function makeSlots(){
-  const xs=[45,93,141,189,237,285,333,381];return xs.map((x,i)=>({x,y:SLOT_Y,w:38,h:68,type:i===0?'vip':i>=5?'plus':'normal',active:i<5,truck:null}));
+function makeQueue(gen){const by=new Map(gen.trucks.map(t=>[t.id,t])),q=[];let cid=0;for(const id of gen.order){const t=by.get(id);for(let i=0;i<t.capacity;i++)q.push({id:`c${cid++}`,color:t.color,visualIndex:q.length,entryT:1})}return q}
+function splitSweetPools(gen){
+  const all=makeQueue(gen);
+  const rotation=all.splice(0,Math.min(ROTATION_CAPACITY,all.length));
+  rotation.forEach((c,i)=>{c.visualIndex=i;c.entryT=1});
+  const leftCount=Math.ceil(all.length/2);
+  const leftFeed=all.splice(0,leftCount),rightFeed=all;
+  return{rotation,leftFeed,rightFeed};
 }
-function newState(n){const gen=generateLevel(n);return{level:n,yard:gen.trucks.map(t=>({...t,state:'yard'})),all:new Map(gen.trucks.map(t=>[t.id,{...t}])),queue:makeQueue(gen),slots:makeSlots(),motions:[],particles:[],boarding:null,departures:[],won:false,lost:false,boosters:{slot:3,shuffle:2,auto:2},coins:250+(n-1)*15,time:0}}
+function makeSlots(){
+  const xs=[90,150,210,270,330];
+  return xs.map((x,i)=>({x,y:SLOT_Y,w:46,h:72,type:i===4?'plus':'normal',active:i<4,truck:null}));
+}
+function newState(n){
+  const gen=generateLevel(n),pools=splitSweetPools(gen);
+  return{level:n,yard:gen.trucks.map(t=>({...t,state:'yard'})),all:new Map(gen.trucks.map(t=>[t.id,{...t}])),rotation:pools.rotation,leftFeed:pools.leftFeed,rightFeed:pools.rightFeed,slots:makeSlots(),motions:[],particles:[],boarding:null,departures:[],won:false,lost:false,boosters:{shuffle:2,auto:2},coins:250+(n-1)*15,time:0};
+}
+function sweetsRemaining(){return state.rotation.length+state.leftFeed.length+state.rightFeed.length}
+function refillRotation(){
+  while(state.rotation.length<ROTATION_CAPACITY&&(state.leftFeed.length||state.rightFeed.length)){
+    const source=state.leftFeed.length?state.leftFeed:state.rightFeed;
+    const side=state.leftFeed.length?'left':'right';
+    const c=source.shift();
+    const fp=feederPos(side,0);
+    c.visualIndex=state.rotation.length;
+    c.entryT=0;
+    c.entryFrom={x:fp.x,y:fp.y};
+    state.rotation.push(c);
+  }
+}
 function start(n){level=n;state=newState(n);overlay.classList.add('hidden');saveLevel();showToast('Tap a truck with a clear path');}
 function saveLevel(){try{localStorage.setItem('sweet-fever-level',String(level))}catch(_){}}
 
@@ -146,12 +185,22 @@ function drawBackground(){
 }
 function drawCrowdTrack(){
   ctx.save();ctx.lineCap='round';ctx.lineJoin='round';
-  // wide track silhouette from path
+  // central rotation track
   ctx.beginPath();candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.strokeStyle='#aebbc4';ctx.lineWidth=88;ctx.stroke();
   ctx.beginPath();candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.strokeStyle='#f7fafc';ctx.lineWidth=78;ctx.stroke();
   ctx.beginPath();candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.strokeStyle='#d6e0e6';ctx.lineWidth=70;ctx.stroke();
+
+  // left and right feeder channels: left drains completely before right begins
+  for(const side of ['left','right']){
+    const x=side==='left'?42:378,join=side==='left'?84:336;
+    ctx.beginPath();ctx.moveTo(x,58);ctx.lineTo(x,215);ctx.quadraticCurveTo(x,265,join,286);
+    ctx.strokeStyle='#aebbc4';ctx.lineWidth=61;ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x,58);ctx.lineTo(x,215);ctx.quadraticCurveTo(x,265,join,286);
+    ctx.strokeStyle='#f7fafc';ctx.lineWidth=53;ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x,58);ctx.lineTo(x,215);ctx.quadraticCurveTo(x,265,join,286);
+    ctx.strokeStyle='#d6e0e6';ctx.lineWidth=46;ctx.stroke();
+  }
   ctx.restore();
-  // exit throat
   roundedRect(185,317,50,43,15,'#778798','#f7fafc',4);
 }
 function drawParkingApron(){
@@ -161,10 +210,10 @@ function drawParkingApron(){
 }
 function drawSlot(s){
   ctx.save();ctx.translate(s.x,s.y);ctx.rotate(-.06);
-  if(s.type==='vip'){
-    roundedRect(-s.w/2,-s.h/2,s.w,s.h,8,'#ae8f16','#d8c55c',2);text('VIP',0,0,13,'#f8e15a','center',1000);
-  }else if(!s.active){
-    roundedRect(-s.w/2,-s.h/2,s.w,s.h,8,'rgba(57,64,83,.28)','rgba(37,44,61,.48)',2);text('+',0,0,28,'#55dc54','center',1000);
+  if(!s.active){
+    roundedRect(-s.w/2,-s.h/2,s.w,s.h,8,'rgba(57,64,83,.28)','rgba(37,44,61,.60)',2);
+    text('+',0,-8,28,'#55dc54','center',1000);
+    text('100',0,16,10,'#ffe24b','center',1000);
   }else{
     roundedRect(-s.w/2,-s.h/2,s.w,s.h,8,'rgba(110,120,143,.2)','#bcc5d2',2);
   }
@@ -176,12 +225,13 @@ function drawJamField(){
 }
 function drawTopUI(){
   circleButton(34,31,23,'#2f6eac','↻');circleButton(386,31,23,'#2f6eac','Ⅱ');
-  text(`Level ${state.level}`,210,28,22,'#2b3443','center',1000);
+  text(`Level ${state.level}`,210,24,22,'#2b3443','center',1000);text(`● ${state.coins}`,210,50,12,'#b78600','center',1000);
 }
 function circleButton(x,y,r,fill,label){ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=fill;ctx.fill();ctx.lineWidth=3;ctx.strokeStyle='#f5f8fb';ctx.stroke();text(label,x,y+1,label==='Ⅱ'?18:23,'#fff','center',1000)}
 function drawBoosters(){
-  const y=857,buttons=[{x:70,label:'AUTO',sub:state.boosters.auto},{x:165,label:'+ SLOT',sub:state.boosters.slot},{x:260,label:'SHUFFLE',sub:state.boosters.shuffle},{x:355,label:'SHOP',sub:'◈'}];
-  for(const b of buttons){ctx.beginPath();ctx.arc(b.x,y,34,0,Math.PI*2);ctx.fillStyle='#2f74ad';ctx.fill();ctx.lineWidth=4;ctx.strokeStyle='#f6fbff';ctx.stroke();text(b.label,b.x,y-4,10,'#fff','center',1000);text(String(b.sub),b.x,y+14,12,b.label==='SHOP'?'#ffde43':'#dff5ff','center',1000)}
+  const fifthOpen=state.slots[4]?.active;
+  const y=857,buttons=[{x:70,label:'AUTO',sub:state.boosters.auto},{x:165,label:fifthOpen?'5TH OPEN':'+ SLOT',sub:fifthOpen?'✓':'100'},{x:260,label:'SHUFFLE',sub:state.boosters.shuffle},{x:355,label:'SHOP',sub:'◈'}];
+  for(const b of buttons){ctx.beginPath();ctx.arc(b.x,y,34,0,Math.PI*2);ctx.fillStyle='#2f74ad';ctx.fill();ctx.lineWidth=4;ctx.strokeStyle='#f6fbff';ctx.stroke();text(b.label,b.x,y-4,10,'#fff','center',1000);text(String(b.sub),b.x,y+14,12,b.label==='SHOP'||b.x===165?'#ffde43':'#dff5ff','center',1000)}
 }
 
 function drawCandy(c,index){
@@ -189,8 +239,25 @@ function drawCandy(c,index){
   ctx.save();ctx.translate(p.x,p.y);ctx.beginPath();ctx.arc(1.5,2.3,5.3,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.18)';ctx.fill();ctx.beginPath();ctx.arc(0,0,5.2,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();
   ctx.beginPath();ctx.arc(-1.7,-1.8,1.6,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.45)';ctx.fill();ctx.restore();
 }
+function drawFeederCandy(c,side,index){
+  const p=feederPos(side,index),col=COLORS[c.color];
+  ctx.save();ctx.translate(p.x,p.y);ctx.beginPath();ctx.arc(1.4,2.1,5.1,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.17)';ctx.fill();ctx.beginPath();ctx.arc(0,0,5,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();ctx.beginPath();ctx.arc(-1.6,-1.7,1.45,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.43)';ctx.fill();ctx.restore();
+}
 function drawQueue(dt){
-  for(let i=state.queue.length-1;i>=0;i--){const c=state.queue[i];const target=i;c.visualIndex+= (target-c.visualIndex)*Math.min(1,dt*9);drawCandy(c,i)}
+  // preview feeders remain visible while only the centre rotation is playable
+  for(let i=state.leftFeed.length-1;i>=0;i--)drawFeederCandy(state.leftFeed[i],'left',i);
+  for(let i=state.rightFeed.length-1;i>=0;i--)drawFeederCandy(state.rightFeed[i],'right',i);
+
+  for(let i=state.rotation.length-1;i>=0;i--){
+    const c=state.rotation[i],target=i;
+    c.visualIndex+=(target-c.visualIndex)*Math.min(1,dt*5.5);
+    if(c.entryT<1)c.entryT=Math.min(1,c.entryT+dt*2.8);
+    if(c.entryT<1&&c.entryFrom){
+      const to=candyPos(c.visualIndex),u=easeOut(c.entryT);
+      const x=lerp(c.entryFrom.x,to.x,u),y=lerp(c.entryFrom.y,to.y,u);
+      const col=COLORS[c.color];ctx.save();ctx.translate(x,y);ctx.beginPath();ctx.arc(0,0,5.2,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();ctx.restore();
+    }else drawCandy(c,i);
+  }
 }
 
 function drawTruck(t,x=t.x,y=t.y,a=t.angle,parked=false){
@@ -251,18 +318,20 @@ function finishMotion(m){
   }
 }
 function beginBoardingIfPossible(){
-  if(state.boarding||!state.queue.length)return;
-  const color=state.queue[0].color;
+  if(state.boarding||!state.rotation.length)return;
+  const color=state.rotation[0].color;
   const idx=state.slots.findIndex(s=>s.truck&&s.truck.color===color&&(s.truck.loaded||0)<s.truck.capacity);
   if(idx>=0)state.boarding={slot:idx,timer:.18};
 }
 function updateBoarding(dt){
   if(!state.boarding){beginBoardingIfPossible();return}
   const b=state.boarding,s=state.slots[b.slot],t=s?.truck;if(!t){state.boarding=null;return}
-  if(!state.queue.length||state.queue[0].color!==t.color){state.boarding=null;return}
+  if(!state.rotation.length||state.rotation[0].color!==t.color){state.boarding=null;return}
   b.timer-=dt;if(b.timer>0)return;b.timer=.12;
-  const c=state.queue.shift();const cp=candyPos(c.visualIndex);state.particles.push({color:c.color,sx:cp.x,sy:cp.y,cx:lerp(cp.x,s.x,.55),cy:Math.min(cp.y,s.y)-24,tx:s.x,ty:s.y-8,t:0,duration:.32});
+  const c=state.rotation.shift();const cp=candyPos(c.visualIndex);
+  state.particles.push({color:c.color,sx:cp.x,sy:cp.y,cx:lerp(cp.x,s.x,.55),cy:Math.min(cp.y,s.y)-24,tx:s.x,ty:s.y-8,t:0,duration:.32});
   t.loaded=(t.loaded||0)+1;
+  refillRotation();
   if(t.loaded>=t.capacity){state.boarding=null;setTimeout(()=>startDeparture(b.slot),90)}
 }
 function startDeparture(slotIndex){
@@ -271,8 +340,9 @@ function startDeparture(slotIndex){
   beginBoardingIfPossible();
 }
 function checkEnd(){
-  if(state.queue.length===0&&state.yard.length===0&&state.slots.every(s=>!s.truck)&&state.motions.length===0){state.won=true;showResult(true);return}
-  const active=state.slots.filter(s=>s.active),full=active.every(s=>s.truck);if(full&&state.queue.length){const c=state.queue[0].color;if(!active.some(s=>s.truck&&s.truck.color===c)){state.lost=true;showResult(false)}}
+  if(sweetsRemaining()===0&&state.yard.length===0&&state.slots.every(s=>!s.truck)&&state.motions.length===0){state.won=true;showResult(true);return}
+  const active=state.slots.filter(s=>s.active),full=active.every(s=>s.truck);
+  if(full&&state.rotation.length){const c=state.rotation[0].color;if(!active.some(s=>s.truck&&s.truck.color===c)){state.lost=true;showResult(false)}}
 }
 
 function dispatchTruck(t){
@@ -302,12 +372,23 @@ function handleTap(x,y){
   }
   const t=hitTruck(x,y);if(t)dispatchTruck(t);
 }
-function autoMove(){if(state.boosters.auto<=0){showToast('No AUTO boosts left');return}const targetColor=state.queue[0]?.color;const candidates=state.yard.filter(t=>t.color===targetColor&&canDriveOut(t,state.yard));if(!candidates.length){showToast('No matching clear truck');return}state.boosters.auto--;dispatchTruck(candidates[0])}
-function unlockSlot(){if(state.boosters.slot<=0){showToast('No extra slots left');return}const s=state.slots.find(x=>x.type==='plus'&&!x.active);if(!s){showToast('All slots are open');return}s.active=true;state.boosters.slot--;showToast('Extra parking slot opened')}
-function shuffleGroups(){if(state.boosters.shuffle<=0||state.queue.length<2){showToast('No shuffle available');return}state.boosters.shuffle--;const groups=[];let i=0;while(i<state.queue.length){const c=state.queue[i].color,g=[];while(i<state.queue.length&&state.queue[i].color===c)g.push(state.queue[i++]);groups.push(g)}for(let j=groups.length-1;j>1;j--){const k=1+Math.floor(Math.random()*j);[groups[j],groups[k]]=[groups[k],groups[j]]}state.queue=groups.flat();showToast('Remaining sweet groups shuffled')}
+function autoMove(){if(state.boosters.auto<=0){showToast('No AUTO boosts left');return}const targetColor=state.rotation[0]?.color;const candidates=state.yard.filter(t=>t.color===targetColor&&canDriveOut(t,state.yard));if(!candidates.length){showToast('No matching clear truck');return}state.boosters.auto--;dispatchTruck(candidates[0])}
+function unlockSlot(){
+  const s=state.slots[4];
+  if(!s||s.active){showToast('Fifth parking slot already open');return}
+  if(state.coins<100){showToast('100 coins needed');return}
+  state.coins-=100;s.active=true;showToast('Fifth parking slot opened');
+}
+function shuffleGroups(){
+  if(state.boosters.shuffle<=0||state.rotation.length<2){showToast('No shuffle available');return}
+  state.boosters.shuffle--;const groups=[];let i=0;
+  while(i<state.rotation.length){const c=state.rotation[i].color,g=[];while(i<state.rotation.length&&state.rotation[i].color===c)g.push(state.rotation[i++]);groups.push(g)}
+  for(let j=groups.length-1;j>1;j--){const k=1+Math.floor(Math.random()*j);[groups[j],groups[k]]=[groups[k],groups[j]]}
+  state.rotation=groups.flat();state.rotation.forEach((c,i)=>c.visualIndex=i);showToast('Current rotation shuffled');
+}
 
 function showToast(msg){toast.textContent=msg;toast.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.classList.remove('show'),1300)}
-function showResult(win){overlay.classList.remove('hidden');overlayBadge.textContent=win?'✓':'!';overlayBadge.style.background=win?'#e4f7eb':'#ffe8e8';overlayBadge.style.color=win?'#2b9f5d':'#d14e4e';overlayTitle.textContent=win?'DELIVERED!':'PARKING FULL';overlayText.textContent=win?'Every sweet has been loaded and sent for delivery.':'The parking area is full and none of the parked trucks can take the next sweet colour.';overlayPrimary.textContent=win?'NEXT LEVEL':'TRY AGAIN';overlayPrimary.onclick=()=>start(win?level+1:level);overlaySecondary.onclick=()=>start(level)}
+function showResult(win){overlay.classList.remove('hidden');overlayBadge.textContent=win?'✓':'!';overlayBadge.style.background=win?'#e4f7eb':'#ffe8e8';overlayBadge.style.color=win?'#2b9f5d':'#d14e4e';overlayTitle.textContent=win?'DELIVERED!':'PARKING FULL';overlayText.textContent=win?'Every sweet has been loaded and sent for delivery.':'The parking area is full and none of the parked trucks can take the next colour in the centre rotation.';overlayPrimary.textContent=win?'NEXT LEVEL':'TRY AGAIN';overlayPrimary.onclick=()=>start(win?level+1:level);overlaySecondary.onclick=()=>start(level)}
 function cap(s){return s.charAt(0).toUpperCase()+s.slice(1)}
 
 canvas.addEventListener('pointerdown',e=>{e.preventDefault();const r=canvas.getBoundingClientRect();pointer.x=(e.clientX-r.left-ox)/scale;pointer.y=(e.clientY-r.top-oy)/scale;handleTap(pointer.x,pointer.y)},{passive:false});
