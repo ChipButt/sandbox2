@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#eef2f7" />
+  <title>Sweet Truck Jam</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="game-shell" aria-label="Sweet Truck Jam">
+    <header class="topbar">
+      <button class="icon-btn" id="settingsBtn" aria-label="Settings">⚙</button>
+      <div class="level-chip">LEVEL <span id="levelNumber">1</span></div>
+      <div class="coin-chip"><span class="coin">●</span><span id="coinCount">250</span></div>
+    </header>
+
+    <section class="queue-panel" aria-label="Sweet queue">
+      <div class="queue-meta">
+        <div class="queue-label">DELIVERY QUEUE</div>
+        <div class="remaining"><span id="remainingCount">0</span> LEFT</div>
+      </div>
+      <div class="queue-window" id="queueWindow"></div>
+    </section>
+
+    <section class="dispatch-zone" aria-label="Loading and holding bays">
+      <div class="loading-lane">
+        <div class="loading-sign">LOADING</div>
+        <div class="loading-truck" id="loadingTruck"></div>
+      </div>
+      <div class="holding-wrap">
+        <div class="holding-label">HOLDING BAYS</div>
+        <div class="holding-slots" id="holdingSlots"></div>
+      </div>
+    </section>
+
+    <section class="yard-wrap">
+      <div class="yard" id="yard" aria-label="Truck yard"></div>
+      <div class="tap-hint" id="tapHint">Tap a truck that has a clear path out</div>
+    </section>
+
+    <nav class="boosters" aria-label="Boosters">
+      <button class="booster" id="undoBtn"><span class="booster-icon">↶</span><span>UNDO</span><b id="undoCount">3</b></button>
+      <button class="booster" id="shuffleBtn"><span class="booster-icon">⤨</span><span>SHUFFLE</span><b id="shuffleCount">2</b></button>
+      <button class="booster" id="slotBtn"><span class="booster-icon">＋</span><span>EXTRA BAY</span><b id="slotCount">1</b></button>
+      <button class="booster" id="hintBtn"><span class="booster-icon">✦</span><span>HINT</span><b id="hintCount">3</b></button>
+    </nav>
+  </main>
+
+  <div class="modal-backdrop hidden" id="resultModal">
+    <div class="modal-card">
+      <div class="modal-emoji" id="modalEmoji">✓</div>
+      <h1 id="modalTitle">DELIVERED!</h1>
+      <p id="modalText">Every sweet is on its way.</p>
+      <button class="primary-btn" id="modalAction">NEXT LEVEL</button>
+      <button class="secondary-btn" id="restartFromModal">RESTART LEVEL</button>
+    </div>
+  </div>
+
+  <div class="modal-backdrop hidden" id="settingsModal">
+    <div class="modal-card compact">
+      <h1>SETTINGS</h1>
+      <label class="toggle-row"><span>Sound</span><input type="checkbox" id="soundToggle" checked /></label>
+      <label class="toggle-row"><span>Vibration</span><input type="checkbox" id="vibrationToggle" checked /></label>
+      <button class="primary-btn" id="restartBtn">RESTART LEVEL</button>
+      <button class="secondary-btn" id="closeSettings">CLOSE</button>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
