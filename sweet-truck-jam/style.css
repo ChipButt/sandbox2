@@ -140,3 +140,41 @@ button { touch-action: manipulation; }
   .dispatch-zone { min-height: 74px; }
   .booster { min-height: 50px; }
 }
+
+/* Real game movement layer */
+.motion-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  overflow: hidden;
+}
+.motion-copy {
+  position: fixed !important;
+  z-index: 10000 !important;
+  margin: 0 !important;
+  pointer-events: none !important;
+  transition: none !important;
+  transform-origin: center center;
+  will-change: transform, opacity;
+}
+.motion-copy .truck-inner {
+  width: 100%;
+  height: 100%;
+}
+.motion-sweet {
+  position: fixed !important;
+  z-index: 10001 !important;
+  pointer-events: none !important;
+  margin: 0 !important;
+  will-change: transform, opacity;
+}
+.loading-truck .mini-truck {
+  transform-origin: center;
+}
+.loading-truck .mini-truck.receiving {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .motion-copy, .motion-sweet { animation-duration: .001ms !important; }
+}
