@@ -24,7 +24,10 @@ let candyPath=[];
 const ROTATION_CAPACITY=240;
 const ROTATION_COLS=4;
 const FEEDER_COLS=4;
-const ROTATION_SPEED_ROWS=3.4;
+const ROTATION_SPEED_ROWS=4.5;
+const LOOP_ROWS=ROTATION_CAPACITY/ROTATION_COLS;
+const LEFT_JOIN_ROW=12;
+const RIGHT_JOIN_ROW=48;
 const pointer={x:0,y:0};
 
 function resize(){
@@ -74,18 +77,14 @@ candyPath=makeCandyPath();
 
 function candyPos(index,phase=state?.rotationPhase||0){
   const row=Math.floor(index/ROTATION_COLS),col=index%ROTATION_COLS;
-  const rows=ROTATION_CAPACITY/ROTATION_COLS;
-  // Row 0 starts one row before the outlet and reaches the outlet exactly
-  // when rotationPhase reaches 1. That keeps the visible outlet row and the
-  // logical row processed by processOutletRow() perfectly synchronised.
-  const rowProgress=((row+1-phase)%rows+rows)%rows;
-  const pathProgress=rowProgress/rows;
+  const rowProgress=((row+phase)%LOOP_ROWS+LOOP_ROWS)%LOOP_ROWS;
+  const pathProgress=rowProgress/LOOP_ROWS;
   const exact=pathProgress*(candyPath.length-1);
   const i0=Math.floor(exact),i1=(i0+1)%candyPath.length,t=exact-i0;
   const p0=candyPath[i0]||candyPath[0],p1=candyPath[i1]||candyPath[0];
   const x=lerp(p0.x,p1.x,t),y=lerp(p0.y,p1.y,t);
   let dx=p1.x-p0.x,dy=p1.y-p0.y;let len=Math.hypot(dx,dy)||1;dx/=len;dy/=len;
-  const nx=-dy,ny=dx; const off=(col-(ROTATION_COLS-1)/2)*10.8;
+  const nx=-dy,ny=dx;const off=(col-(ROTATION_COLS-1)/2)*10.8;
   return{x:x+nx*off,y:y+ny*off};
 }
 function feederPos(side,index){
@@ -98,17 +97,12 @@ function feederPos(side,index){
   return{x:centreX+off,y};
 }
 function feederJoin(side,col){
-  const base=side==='left'?{x:112,y:265}:{x:308,y:252};
-  const tangent=side==='left'?{x:.58,y:.82}:{x:-.58,y:.82};
-  const off=(col-(FEEDER_COLS-1)/2)*8.6;
-  return{x:base.x+tangent.x*off,y:base.y+tangent.y*off};
+  const row=side==='left'?LEFT_JOIN_ROW:RIGHT_JOIN_ROW;
+  return candyPos(row*ROTATION_COLS+col,0);
 }
 function feederControl(side,col){
   const start=feederPos(side,col),join=feederJoin(side,col);
-  return{
-    x:side==='left'?72:348,
-    y:lerp(start.y,join.y,.48)
-  };
+  return{x:side==='left'?78:342,y:lerp(start.y,join.y,.52)};
 }
 
 function truckPoly(t,x=t.x,y=t.y,angle=t.angle){
@@ -219,19 +213,31 @@ function rowsAreValid(list){
   }
   return true;
 }
+function loopRowsAreValid(list){
+  if(list.length!==ROTATION_CAPACITY)return false;
+  for(let i=0;i<list.length;i+=4){
+    const row=list.slice(i,i+4);
+    const empty=row.every(c=>c==null);
+    if(empty)continue;
+    if(row.some(c=>c==null)||row.some(c=>c.color!==row[0].color))return false;
+  }
+  return true;
+}
 function splitSweetPools(gen){
   const all=makeQueue(gen);
   if(!rowsAreValid(all))throw new Error('Generated sweets do not form complete four-sweet rows');
 
-  const rotationCount=Math.min(ROTATION_CAPACITY,all.length);
-  const rotation=all.splice(0,rotationCount);
-  rotation.forEach((c,i)=>{c.visualIndex=i;c.entryT=1});
+  const take=Math.min(ROTATION_CAPACITY,Math.floor(all.length/4)*4);
+  const rotation=all.splice(0,take);
+  while(rotation.length<ROTATION_CAPACITY)rotation.push(null);
 
   const remainingRows=all.length/4;
   const leftRows=Math.ceil(remainingRows/2);
   const leftFeed=all.splice(0,leftRows*4),rightFeed=all;
+  leftFeed.forEach((c,i)=>c.feedVisualIndex=i);
+  rightFeed.forEach((c,i)=>c.feedVisualIndex=i);
 
-  if(!rowsAreValid(rotation)||!rowsAreValid(leftFeed)||!rowsAreValid(rightFeed))throw new Error('Sweet pool row integrity failed');
+  if(!loopRowsAreValid(rotation)||!rowsAreValid(leftFeed)||!rowsAreValid(rightFeed))throw new Error('Sweet pool row integrity failed');
   return{rotation,leftFeed,rightFeed};
 }
 function makeSlots(){
@@ -242,31 +248,40 @@ function newState(n){
   const gen=generateLevel(n),pools=splitSweetPools(gen);
   return{level:n,yard:gen.trucks.map(t=>({...t,state:'yard'})),all:new Map(gen.trucks.map(t=>[t.id,{...t}])),rotation:pools.rotation,leftFeed:pools.leftFeed,rightFeed:pools.rightFeed,slots:makeSlots(),motions:[],particles:[],boarding:null,departures:[],won:false,lost:false,boosters:{shuffle:2,auto:2},coins:250+(n-1)*15,time:0,rotationPhase:0};
 }
-function sweetsRemaining(){return state.rotation.length+state.leftFeed.length+state.rightFeed.length}
-function refillRotation(){
-  while(state.rotation.length<=ROTATION_CAPACITY-4&&(state.leftFeed.length>=4||state.rightFeed.length>=4)){
-    const useLeft=state.leftFeed.length>=4;
-    const source=useLeft?state.leftFeed:state.rightFeed;
-    const side=useLeft?'left':'right';
-    const row=source.splice(0,4);
-    if(row.length!==4||row.some(c=>c.color!==row[0].color))throw new Error('Feeder supplied an invalid row');
-
-    const baseIndex=state.rotation.length;
-    for(let i=0;i<4;i++){
-      const c=row[i],fp=feederPos(side,i);
-      c.visualIndex=baseIndex+i;
-      c.entryT=0;
-      c.entryFrom={x:fp.x,y:fp.y};
-      c.entryControl=feederControl(side,i);
-      c.entryJoin=feederJoin(side,i);
-      c.entrySide=side;
-      state.rotation.push(c);
-    }
-  }
+function sweetsRemaining(){
+  return state.rotation.filter(Boolean).length+state.leftFeed.length+state.rightFeed.length;
 }
+function gapAtRow(rowIndex){
+  const base=rowIndex*ROTATION_COLS,row=state.rotation.slice(base,base+4);
+  return row.length===4&&row.every(c=>c==null);
+}
+function insertFeederRow(rowIndex,side){
+  const source=side==='left'?state.leftFeed:state.rightFeed;
+  if(source.length<4||!gapAtRow(rowIndex))return false;
+  const row=source.splice(0,4);
+  if(row.length!==4||row.some(c=>c.color!==row[0].color))throw new Error('Feeder supplied an invalid row');
+
+  const base=rowIndex*ROTATION_COLS;
+  for(let i=0;i<4;i++){
+    const c=row[i],fp=feederPos(side,i);
+    c.entryT=0;
+    c.entryFrom={x:fp.x,y:fp.y};
+    c.entryControl=feederControl(side,i);
+    c.entryJoin=feederJoin(side,i);
+    state.rotation[base+i]=c;
+  }
+  return true;
+}
+function processFeederJunctions(){
+  // The travelling gap reaches the left merge first. While any left rows remain,
+  // the right merge is deliberately inactive.
+  if(state.leftFeed.length>=4)insertFeederRow(LEFT_JOIN_ROW,'left');
+  else if(state.rightFeed.length>=4)insertFeederRow(RIGHT_JOIN_ROW,'right');
+}
+
 function start(n){
   level=n;state=newState(n);
-  if(!rowsAreValid(state.rotation)||!rowsAreValid(state.leftFeed)||!rowsAreValid(state.rightFeed))throw new Error('Level started with an invalid sweet row');
+  if(!loopRowsAreValid(state.rotation)||!rowsAreValid(state.leftFeed)||!rowsAreValid(state.rightFeed))throw new Error('Level started with an invalid sweet row');
   overlay.classList.add('hidden');saveLevel();showToast('Tap a truck with a clear path');
 }
 function saveLevel(){try{localStorage.setItem('sweet-fever-level',String(level))}catch(_){}}
@@ -344,34 +359,37 @@ function drawCandy(c,index){
   ctx.save();ctx.translate(p.x,p.y);ctx.beginPath();ctx.arc(1.5,2.3,5.3,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.18)';ctx.fill();ctx.beginPath();ctx.arc(0,0,5.2,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();
   ctx.beginPath();ctx.arc(-1.7,-1.8,1.6,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.45)';ctx.fill();ctx.restore();
 }
-function drawFeederCandy(c,side,index){
-  const p=feederPos(side,index),col=COLORS[c.color];
+function drawFeederCandy(c,side,index,dt){
+  if(c.feedVisualIndex==null)c.feedVisualIndex=index;
+  c.feedVisualIndex+=(index-c.feedVisualIndex)*Math.min(1,dt*8);
+  const p=feederPos(side,c.feedVisualIndex),col=COLORS[c.color];
   ctx.save();ctx.translate(p.x,p.y);ctx.beginPath();ctx.arc(1.4,2.1,5.1,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.17)';ctx.fill();ctx.beginPath();ctx.arc(0,0,5,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();ctx.beginPath();ctx.arc(-1.6,-1.7,1.45,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.43)';ctx.fill();ctx.restore();
 }
 function drawQueue(dt){
-  // preview feeders remain visible while only the centre rotation is playable
-  for(let i=state.leftFeed.length-1;i>=0;i--)drawFeederCandy(state.leftFeed[i],'left',i);
-  for(let i=state.rightFeed.length-1;i>=0;i--)drawFeederCandy(state.rightFeed[i],'right',i);
+  for(let i=state.leftFeed.length-1;i>=0;i--)drawFeederCandy(state.leftFeed[i],'left',i,dt);
+  for(let i=state.rightFeed.length-1;i>=0;i--)drawFeederCandy(state.rightFeed[i],'right',i,dt);
 
   for(let i=state.rotation.length-1;i>=0;i--){
-    const c=state.rotation[i],target=i;
-    c.visualIndex+=(target-c.visualIndex)*Math.min(1,dt*9);
-    if(c.entryT<1)c.entryT=Math.min(1,c.entryT+dt*2.8);
+    const c=state.rotation[i];
+    if(!c)continue;
+
+    if(c.entryT<1)c.entryT=Math.min(1,c.entryT+dt*5.2);
     if(c.entryT<1&&c.entryFrom){
-      const to=candyPos(c.visualIndex),u=easeOut(c.entryT);
+      const to=candyPos(i),u=easeOut(c.entryT);
       let x,y;
-      if(u<.62){
-        const v=u/.62,q=1-v;
-        const cp=c.entryControl||c.entryFrom,jp=c.entryJoin||to;
+      if(u<.68){
+        const v=u/.68,q=1-v,cp=c.entryControl||c.entryFrom,jp=c.entryJoin||to;
         x=q*q*c.entryFrom.x+2*q*v*cp.x+v*v*jp.x;
         y=q*q*c.entryFrom.y+2*q*v*cp.y+v*v*jp.y;
       }else{
-        const v=(u-.62)/.38,q=1-v,jp=c.entryJoin||c.entryFrom;
-        x=lerp(jp.x,to.x,v);
-        y=lerp(jp.y,to.y,v);
+        const v=(u-.68)/.32,jp=c.entryJoin||c.entryFrom;
+        x=lerp(jp.x,to.x,v);y=lerp(jp.y,to.y,v);
       }
       const col=COLORS[c.color];ctx.save();ctx.translate(x,y);ctx.beginPath();ctx.arc(0,0,5.2,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();ctx.restore();
-    }else drawCandy(c,i);
+    }else{
+      const p=candyPos(i),col=COLORS[c.color];
+      ctx.save();ctx.translate(p.x,p.y);ctx.beginPath();ctx.arc(1.5,2.3,5.3,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.18)';ctx.fill();ctx.beginPath();ctx.arc(0,0,5.2,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();ctx.beginPath();ctx.arc(-1.7,-1.8,1.6,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.45)';ctx.fill();ctx.restore();
+    }
   }
 }
 
@@ -434,66 +452,63 @@ function finishMotion(m){
   }
 }
 function frontRowColor(){
-  if(state.rotation.length<4)return null;
-  const row=state.rotation.slice(0,4);
-  return row.every(c=>c.color===row[0].color)?row[0].color:null;
+  // Next occupied row that will reach the outlet, ignoring travelling gaps.
+  for(let r=LOOP_ROWS-1;r>=0;r--){
+    const row=state.rotation.slice(r*4,r*4+4);
+    if(row.every(c=>c==null))continue;
+    if(row.some(c=>c==null)||row.some(c=>c.color!==row[0].color))throw new Error('Malformed loop row');
+    return row[0].color;
+  }
+  return null;
 }
-function beginBoardingIfPossible(){
-  // Loading is now synchronised to rows physically reaching the outlet.
-}
-function updateBoarding(){
-  // Kept as a compatibility no-op; the conveyor handles row loading.
-}
+function beginBoardingIfPossible(){}
+function updateBoarding(){}
+
 function updateRotationConveyor(dt){
-  if(!state.rotation.length)return;
-
   state.rotationPhase+=dt*ROTATION_SPEED_ROWS;
-  while(state.rotationPhase>=1&&state.rotation.length>=4){
+  while(state.rotationPhase>=1){
     state.rotationPhase-=1;
-    processOutletRow();
+    advanceLoopOneRow();
   }
 }
-function processOutletRow(){
-  const row=state.rotation.slice(0,4);
-  if(row.length!==4||row.some(c=>c.color!==row[0].color))throw new Error('Invalid row reached outlet');
-  const rowColor=row[0].color;
+function advanceLoopOneRow(){
+  const base=(LOOP_ROWS-1)*ROTATION_COLS;
+  const outletRow=state.rotation.slice(base,base+4);
+  const isGap=outletRow.every(c=>c==null);
+  if(!isGap&&(outletRow.some(c=>c==null)||outletRow.some(c=>c.color!==outletRow[0].color)))throw new Error('Invalid row reached outlet');
 
-  // A parked matching truck takes this complete row. Otherwise it passes the
-  // outlet and continues around the centre loop.
-  const slotIndex=state.slots.findIndex(s=>s.truck&&s.truck.color===rowColor&&((s.truck.loaded||0)+4)<=s.truck.capacity);
-  const leaving=slotIndex>=0;
+  let wrapped=outletRow;
+  if(!isGap){
+    const rowColor=outletRow[0].color;
+    const slotIndex=state.slots.findIndex(s=>s.truck&&s.truck.color===rowColor&&((s.truck.loaded||0)+4)<=s.truck.capacity);
 
-  state.rotation.splice(0,4);
-  for(const c of state.rotation)c.visualIndex-=4;
-
-  if(leaving){
-    const slot=state.slots[slotIndex],truck=slot.truck;
-    for(let i=0;i<4;i++){
-      const c=row[i],cp=candyPos(i,1),lateral=(i-1.5)*4.5;
-      state.particles.push({
-        color:c.color,
-        sx:cp.x,sy:cp.y,
-        cx:lerp(cp.x,slot.x,.55)+lateral,
-        cy:Math.min(cp.y,slot.y)-24,
-        tx:slot.x+lateral,ty:slot.y-8,
-        t:0,duration:.34
-      });
-    }
-    truck.loaded=(truck.loaded||0)+4;
-    if(truck.loaded>=truck.capacity)setTimeout(()=>startDeparture(slotIndex),110);
-    refillRotation();
-  }else{
-    // No matching truck: the intact four-sweet row loops past the outlet and
-    // rejoins the back of the current rotation.
-    const base=state.rotation.length;
-    for(let i=0;i<4;i++){
-      row[i].visualIndex=base+i;
-      row[i].entryT=1;
-      state.rotation.push(row[i]);
+    if(slotIndex>=0){
+      const slot=state.slots[slotIndex],truck=slot.truck;
+      for(let i=0;i<4;i++){
+        const c=outletRow[i],cp=candyPos(base+i,1),lateral=(i-1.5)*4.5;
+        state.particles.push({
+          color:c.color,
+          sx:cp.x,sy:cp.y,
+          cx:lerp(cp.x,slot.x,.55)+lateral,
+          cy:Math.min(cp.y,slot.y)-24,
+          tx:slot.x+lateral,ty:slot.y-8,
+          t:0,duration:.34
+        });
+      }
+      truck.loaded=(truck.loaded||0)+4;
+      if(truck.loaded>=truck.capacity)setTimeout(()=>startDeparture(slotIndex),110);
+      wrapped=[null,null,null,null]; // the departing row leaves a real travelling gap
     }
   }
 
-  if(!rowsAreValid(state.rotation))throw new Error('Rotation row integrity lost');
+  // Advance every physical row one slot around the loop. The outlet row wraps to slot 0
+  // unless it was diverted to a truck, in which case a four-wide empty gap wraps instead.
+  state.rotation=[...wrapped,...state.rotation.slice(0,base)];
+
+  // A feeder may fill the gap ONLY when that gap reaches its actual merge position.
+  processFeederJunctions();
+
+  if(!loopRowsAreValid(state.rotation))throw new Error('Rotation row integrity lost');
   checkEnd();
 }
 function startDeparture(slotIndex){
@@ -503,10 +518,12 @@ function startDeparture(slotIndex){
 }
 function checkEnd(){
   if(sweetsRemaining()===0&&state.yard.length===0&&state.slots.every(s=>!s.truck)&&state.motions.length===0){state.won=true;showResult(true);return}
-  const active=state.slots.filter(s=>s.active),full=active.every(s=>s.truck);
-  if(full&&state.rotation.length){
-    const c=frontRowColor();
-    if(c&&!active.some(s=>s.truck&&s.truck.color===c)){state.lost=true;showResult(false)}
+
+  const active=state.slots.filter(s=>s.active),full=active.length>0&&active.every(s=>s.truck);
+  if(full){
+    const parkedColors=new Set(active.map(s=>s.truck.color));
+    const possible=[...state.rotation.filter(Boolean),...state.leftFeed,...state.rightFeed];
+    if(possible.length&&!possible.some(c=>parkedColors.has(c.color))){state.lost=true;showResult(false)}
   }
 }
 
@@ -547,20 +564,22 @@ function unlockSlot(){
   state.coins-=100;s.active=true;showToast('Fifth parking slot opened');
 }
 function shuffleGroups(){
-  if(state.boosters.shuffle<=0||state.rotation.length<8){showToast('No shuffle available');return}
-  if(!rowsAreValid(state.rotation)){showToast('Rotation row error');return}
+  if(state.boosters.shuffle<=0){showToast('No shuffle available');return}
+  const rowSlots=[];
+  for(let r=0;r<LOOP_ROWS;r++)rowSlots.push(state.rotation.slice(r*4,r*4+4));
+  const occupied=rowSlots.map((row,i)=>({row,i})).filter(x=>!x.row.every(c=>c==null));
+  if(occupied.length<2){showToast('No shuffle available');return}
 
   state.boosters.shuffle--;
-  const rows=[];
-  for(let i=0;i<state.rotation.length;i+=4)rows.push(state.rotation.slice(i,i+4));
+  const fixed=occupied[occupied.length-1];
+  const movable=occupied.slice(0,-1).map(x=>x.row);
+  for(let j=movable.length-1;j>0;j--){const k=Math.floor(Math.random()*(j+1));[movable[j],movable[k]]=[movable[k],movable[j]]}
 
-  // Keep the current playable row fixed; shuffle only later complete rows.
-  for(let j=rows.length-1;j>1;j--){
-    const k=1+Math.floor(Math.random()*j);
-    [rows[j],rows[k]]=[rows[k],rows[j]];
+  let m=0;
+  for(const item of occupied){
+    const row=item===fixed?fixed.row:movable[m++];
+    for(let c=0;c<4;c++)state.rotation[item.i*4+c]=row[c];
   }
-  state.rotation=rows.flat();
-  state.rotation.forEach((c,i)=>c.visualIndex=i);
   showToast('Current rotation rows shuffled');
 }
 function showToast(msg){toast.textContent=msg;toast.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.classList.remove('show'),1300)}
