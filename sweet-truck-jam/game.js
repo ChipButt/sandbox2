@@ -24,6 +24,7 @@ let candyPath=[];
 const ROTATION_CAPACITY=240;
 const ROTATION_COLS=4;
 const FEEDER_COLS=4;
+const ROTATION_SPEED_ROWS=.85;
 const pointer={x:0,y:0};
 
 function resize(){
@@ -71,24 +72,40 @@ function makeCandyPath(){
 }
 candyPath=makeCandyPath();
 
-function candyPos(index){
+function candyPos(index,phase=state?.rotationPhase||0){
   const row=Math.floor(index/ROTATION_COLS),col=index%ROTATION_COLS;
-  const rows=Math.ceil(ROTATION_CAPACITY/ROTATION_COLS);
-  const progress=rows<=1?0:row/(rows-1);
-  const pi=Math.min(candyPath.length-1,Math.round(progress*(candyPath.length-1)));
-  const p=candyPath[pi]||candyPath[candyPath.length-1];
-  const p2=candyPath[Math.min(pi+1,candyPath.length-1)]||p;
-  let dx=p2.x-p.x,dy=p2.y-p.y;let len=Math.hypot(dx,dy)||1;dx/=len;dy/=len;
+  const rows=ROTATION_CAPACITY/ROTATION_COLS;
+  const rowProgress=((row+phase)%rows+rows)%rows;
+  const pathProgress=rowProgress/rows;
+  const exact=pathProgress*(candyPath.length-1);
+  const i0=Math.floor(exact),i1=(i0+1)%candyPath.length,t=exact-i0;
+  const p0=candyPath[i0]||candyPath[0],p1=candyPath[i1]||candyPath[0];
+  const x=lerp(p0.x,p1.x,t),y=lerp(p0.y,p1.y,t);
+  let dx=p1.x-p0.x,dy=p1.y-p0.y;let len=Math.hypot(dx,dy)||1;dx/=len;dy/=len;
   const nx=-dy,ny=dx; const off=(col-(ROTATION_COLS-1)/2)*10.8;
-  return{x:p.x+nx*off,y:p.y+ny*off};
+  return{x:x+nx*off,y:y+ny*off};
 }
 function feederPos(side,index){
   const row=Math.floor(index/FEEDER_COLS),col=index%FEEDER_COLS;
-  // Separate 4-wide vertical preview lanes. They never enter the centre loop.
+  // Four-wide preview lanes remain outside the centre. The empty connector below
+  // is what joins them to the central loop.
   const centreX=side==='left'?38:382;
   const y=292-row*9.4;
   const off=(col-(FEEDER_COLS-1)/2)*8.6;
   return{x:centreX+off,y};
+}
+function feederJoin(side,col){
+  const base=side==='left'?{x:112,y:265}:{x:308,y:252};
+  const tangent=side==='left'?{x:.58,y:.82}:{x:-.58,y:.82};
+  const off=(col-(FEEDER_COLS-1)/2)*8.6;
+  return{x:base.x+tangent.x*off,y:base.y+tangent.y*off};
+}
+function feederControl(side,col){
+  const start=feederPos(side,col),join=feederJoin(side,col);
+  return{
+    x:side==='left'?72:348,
+    y:lerp(start.y,join.y,.48)
+  };
 }
 
 function truckPoly(t,x=t.x,y=t.y,angle=t.angle){
@@ -220,7 +237,7 @@ function makeSlots(){
 }
 function newState(n){
   const gen=generateLevel(n),pools=splitSweetPools(gen);
-  return{level:n,yard:gen.trucks.map(t=>({...t,state:'yard'})),all:new Map(gen.trucks.map(t=>[t.id,{...t}])),rotation:pools.rotation,leftFeed:pools.leftFeed,rightFeed:pools.rightFeed,slots:makeSlots(),motions:[],particles:[],boarding:null,departures:[],won:false,lost:false,boosters:{shuffle:2,auto:2},coins:250+(n-1)*15,time:0};
+  return{level:n,yard:gen.trucks.map(t=>({...t,state:'yard'})),all:new Map(gen.trucks.map(t=>[t.id,{...t}])),rotation:pools.rotation,leftFeed:pools.leftFeed,rightFeed:pools.rightFeed,slots:makeSlots(),motions:[],particles:[],boarding:null,departures:[],won:false,lost:false,boosters:{shuffle:2,auto:2},coins:250+(n-1)*15,time:0,rotationPhase:0};
 }
 function sweetsRemaining(){return state.rotation.length+state.leftFeed.length+state.rightFeed.length}
 function refillRotation(){
@@ -237,6 +254,9 @@ function refillRotation(){
       c.visualIndex=baseIndex+i;
       c.entryT=0;
       c.entryFrom={x:fp.x,y:fp.y};
+      c.entryControl=feederControl(side,i);
+      c.entryJoin=feederJoin(side,i);
+      c.entrySide=side;
       state.rotation.push(c);
     }
   }
@@ -263,16 +283,24 @@ function drawCrowdTrack(){
   ctx.beginPath();candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.strokeStyle='#f7fafc';ctx.lineWidth=46;ctx.stroke();
   ctx.beginPath();candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.strokeStyle='#d6e0e6';ctx.lineWidth=40;ctx.stroke();
 
-  // Separate four-wide feeder channels. These are completely detached from
-  // the central loop; only a sweet that is actively topping up animates across the gap.
+  // Four-wide feeder lanes connect into the centre loop through empty curved
+  // junctions. Waiting feeder sweets stop before the junction, so they never overlap
+  // the circulating sweets; only an actively transferred row crosses the connector.
   for(const side of ['left','right']){
     const x=side==='left'?38:382;
-    ctx.beginPath();ctx.moveTo(x,22);ctx.lineTo(x,300);
-    ctx.strokeStyle='#aebbc4';ctx.lineWidth=40;ctx.stroke();
-    ctx.beginPath();ctx.moveTo(x,22);ctx.lineTo(x,300);
-    ctx.strokeStyle='#f7fafc';ctx.lineWidth=36;ctx.stroke();
-    ctx.beginPath();ctx.moveTo(x,22);ctx.lineTo(x,300);
-    ctx.strokeStyle='#d6e0e6';ctx.lineWidth=32;ctx.stroke();
+    const join=side==='left'?{x:112,y:265}:{x:308,y:252};
+    const control=side==='left'?{x:72,y:284}:{x:348,y:278};
+    for(const stroke of [
+      {w:40,c:'#aebbc4'},
+      {w:36,c:'#f7fafc'},
+      {w:32,c:'#d6e0e6'}
+    ]){
+      ctx.beginPath();
+      ctx.moveTo(x,22);
+      ctx.lineTo(x,300);
+      ctx.quadraticCurveTo(control.x,control.y,join.x,join.y);
+      ctx.strokeStyle=stroke.c;ctx.lineWidth=stroke.w;ctx.stroke();
+    }
   }
   ctx.restore();
   roundedRect(185,317,50,43,15,'#778798','#f7fafc',4);
@@ -328,7 +356,17 @@ function drawQueue(dt){
     if(c.entryT<1)c.entryT=Math.min(1,c.entryT+dt*2.8);
     if(c.entryT<1&&c.entryFrom){
       const to=candyPos(c.visualIndex),u=easeOut(c.entryT);
-      const x=lerp(c.entryFrom.x,to.x,u),y=lerp(c.entryFrom.y,to.y,u);
+      let x,y;
+      if(u<.62){
+        const v=u/.62,q=1-v;
+        const cp=c.entryControl||c.entryFrom,jp=c.entryJoin||to;
+        x=q*q*c.entryFrom.x+2*q*v*cp.x+v*v*jp.x;
+        y=q*q*c.entryFrom.y+2*q*v*cp.y+v*v*jp.y;
+      }else{
+        const v=(u-.62)/.38,q=1-v,jp=c.entryJoin||c.entryFrom;
+        x=lerp(jp.x,to.x,v);
+        y=lerp(jp.y,to.y,v);
+      }
       const col=COLORS[c.color];ctx.save();ctx.translate(x,y);ctx.beginPath();ctx.arc(0,0,5.2,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();ctx.restore();
     }else drawCandy(c,i);
   }
@@ -377,6 +415,7 @@ function drawParticles(){
 
 function update(dt){
   state.time+=dt;
+  if(state.rotation.length)state.rotationPhase=(state.rotationPhase+dt*ROTATION_SPEED_ROWS)%(ROTATION_CAPACITY/ROTATION_COLS);
   for(const t of state.yard)if(t.shake>0)t.shake=Math.max(0,t.shake-dt);
   for(const m of state.motions)m.t+=dt;
   for(let i=state.motions.length-1;i>=0;i--){const m=state.motions[i];if(m.t>=m.duration){state.motions.splice(i,1);finishMotion(m)}}
