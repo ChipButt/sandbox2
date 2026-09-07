@@ -231,7 +231,7 @@ function motionPose(m){
   return{x:m.sx,y:m.sy,a:m.sa}
 }
 function drawParticles(){
-  for(const p of state.particles){const u=clamp(p.t/p.duration,0,1),q=1-u,x=q*q*p.sx+2*q*u*p.cx+u*u*p.tx,y=q*q*p.sy+2*q*u*p.cy+u*u*p.ty - Math.sin(u*Math.PI)*12;ctx.globalAlpha=1-u*.18;ctx.beginPath();ctx.arc(x,y,5.2*(1-u*.15),0,Math.PI*2);ctx.fillStyle=COLORS[p.color];ctx.fill();ctx.beginPath();ctx.arc(x-1.7,y-1.7,1.5,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.48)';ctx.fill();ctx.globalAlpha=1}
+  for(const p of state.particles){const u=clamp(p.t/p.duration,0,1),q=1-u,x=q*q*p.sx+2*q*u*p.cx+u*u*p.tx,y=q*q*p.sy+2*q*u*p.cy+u*u*p.ty - Math.sin(u*Math.PI)*5;ctx.globalAlpha=1-u*.18;ctx.beginPath();ctx.arc(x,y,4.8*(1-u*.10),0,Math.PI*2);ctx.fillStyle=COLORS[p.color];ctx.fill();ctx.beginPath();ctx.arc(x-1.5,y-1.5,1.3,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.48)';ctx.fill();ctx.globalAlpha=1}
 }
 
 function update(dt){
@@ -254,14 +254,14 @@ function beginBoardingIfPossible(){
   if(state.boarding||!state.queue.length)return;
   const color=state.queue[0].color;
   const idx=state.slots.findIndex(s=>s.truck&&s.truck.color===color&&(s.truck.loaded||0)<s.truck.capacity);
-  if(idx>=0)state.boarding={slot:idx,timer:.04};
+  if(idx>=0)state.boarding={slot:idx,timer:.18};
 }
 function updateBoarding(dt){
   if(!state.boarding){beginBoardingIfPossible();return}
   const b=state.boarding,s=state.slots[b.slot],t=s?.truck;if(!t){state.boarding=null;return}
   if(!state.queue.length||state.queue[0].color!==t.color){state.boarding=null;return}
-  b.timer-=dt;if(b.timer>0)return;b.timer=.045;
-  const c=state.queue.shift();const cp=candyPos(c.visualIndex);state.particles.push({color:c.color,sx:cp.x,sy:cp.y,cx:lerp(cp.x,s.x,.55),cy:Math.min(cp.y,s.y)-45,tx:s.x,ty:s.y-10,t:0,duration:.24});
+  b.timer-=dt;if(b.timer>0)return;b.timer=.12;
+  const c=state.queue.shift();const cp=candyPos(c.visualIndex);state.particles.push({color:c.color,sx:cp.x,sy:cp.y,cx:lerp(cp.x,s.x,.55),cy:Math.min(cp.y,s.y)-24,tx:s.x,ty:s.y-8,t:0,duration:.32});
   t.loaded=(t.loaded||0)+1;
   if(t.loaded>=t.capacity){state.boarding=null;setTimeout(()=>startDeparture(b.slot),90)}
 }
