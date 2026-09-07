@@ -1,17 +1,17 @@
-# Sweet Truck Jam
+# Sweet Truck Fever
 
-A mobile-first browser prototype of the colour-matching traffic-jam puzzle format, reskinned so circular coloured sweets are loaded into delivery trucks.
+A browser-based game using the Bus Traffic Fever-style parking-and-colour-sorting gameplay loop, reskinned with circular sweets and delivery trucks.
 
-## Gameplay
+## Core gameplay
+- Dense traffic board with trucks blocked by one another.
+- Tap only trucks with a clear path out.
+- Trucks drive from the board into limited parking/loading spaces.
+- A winding stream of coloured circular sweets advances toward the loading point.
+- Parked trucks automatically take matching sweets from the front of the stream.
+- Capacity counters decrease as sweets load.
+- Full trucks drive away and free the space.
+- Filling all usable spaces without a truck matching the front sweet colour causes failure.
+- Extra/VIP parking spaces can be opened.
+- Later levels introduce more colours, denser boards and hidden trucks.
 
-- Tap a delivery truck only when its arrow has a clear path to the edge of the yard.
-- If the truck colour matches the next sweets in the queue, it goes straight to loading.
-- Otherwise it waits in one of the limited holding bays.
-- Waiting trucks automatically load when their colour reaches the front of the queue.
-- Clear every truck and every sweet to finish the level.
-- If the holding bays are full and no legal move can serve the next colour, the level is lost.
-- Includes Undo, Shuffle, Extra Bay and Hint boosters.
-
-## Hosting
-
-The project is static HTML/CSS/JavaScript and can be hosted directly on GitHub Pages with no backend, database, API key or build step.
+The build is a self-contained HTML5 Canvas game with no backend or external dependencies.
