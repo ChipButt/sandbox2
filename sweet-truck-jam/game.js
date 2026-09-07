@@ -51,15 +51,17 @@ function text(s,x,y,size,fill='#fff',align='center',weight=900){ctx.fillStyle=fi
 
 function makeCandyPath(){
   const pts=[];
+  // A deliberately narrower centre-only loop. Its outer edge stays well clear
+  // of the two preview feeder lanes on the far left and right.
   const segs=[
-    [[210,333],[168,340],[93,322],[78,267]],
-    [[78,267],[62,213],[68,118],[116,82]],
-    [[116,82],[172,38],[292,48],[337,107]],
-    [[337,107],[375,157],[369,247],[331,294]],
-    [[331,294],[300,329],[254,336],[222,329]]
+    [[210,322],[169,326],[128,309],[114,264]],
+    [[114,264],[100,208],[105,139],[142,101]],
+    [[142,101],[177,68],[244,68],[280,96]],
+    [[280,96],[315,125],[320,195],[307,252]],
+    [[307,252],[296,298],[255,322],[210,322]]
   ];
-  for(const s of segs){for(let i=0;i<40;i++){const t=i/40,mt=1-t;pts.push({x:mt*mt*mt*s[0][0]+3*mt*mt*t*s[1][0]+3*mt*t*t*s[2][0]+t*t*t*s[3][0],y:mt*mt*mt*s[0][1]+3*mt*mt*t*s[1][1]+3*mt*t*t*s[2][1]+t*t*t*s[3][1]})}}
-  pts.push({x:222,y:329});
+  for(const seg of segs){for(let i=0;i<40;i++){const t=i/40,mt=1-t;pts.push({x:mt*mt*mt*seg[0][0]+3*mt*mt*t*seg[1][0]+3*mt*t*t*seg[2][0]+t*t*t*seg[3][0],y:mt*mt*mt*seg[0][1]+3*mt*mt*t*seg[1][1]+3*mt*t*t*seg[2][1]+t*t*t*seg[3][1]})}}
+  pts.push({x:210,y:322});
   const dense=[]; let carry=0,prev=pts[0]; dense.push(prev);
   for(let i=1;i<pts.length;i++){
     const p=pts[i],dx=p.x-prev.x,dy=p.y-prev.y,d=Math.hypot(dx,dy); carry+=d;
@@ -82,13 +84,9 @@ function candyPos(index){
 }
 function feederPos(side,index){
   const row=Math.floor(index/FEEDER_COLS),col=index%FEEDER_COLS;
-  // Four abreast. The next sweets sit at the bottom of a separate outer feeder lane;
-  // later sweets continue upward/off-screen, keeping both feeders clear of the centre loop.
-  const edgeX=side==='left'?18:402;
-  const mouthShift=(side==='left'?1:-1)*10;
-  const straighten=Math.min(1,row/14);
-  const centreX=edgeX+mouthShift*(1-straighten);
-  const y=262-row*9.4;
+  // Separate 4-wide vertical preview lanes. They never enter the centre loop.
+  const centreX=side==='left'?38:382;
+  const y=292-row*9.4;
   const off=(col-(FEEDER_COLS-1)/2)*8.6;
   return{x:centreX+off,y};
 }
@@ -190,20 +188,20 @@ function drawBackground(){
 function drawCrowdTrack(){
   ctx.save();ctx.lineCap='round';ctx.lineJoin='round';
   // central rotation track
-  ctx.beginPath();candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.strokeStyle='#aebbc4';ctx.lineWidth=56;ctx.stroke();
-  ctx.beginPath();candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.strokeStyle='#f7fafc';ctx.lineWidth=50;ctx.stroke();
-  ctx.beginPath();candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.strokeStyle='#d6e0e6';ctx.lineWidth=44;ctx.stroke();
+  ctx.beginPath();candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.strokeStyle='#aebbc4';ctx.lineWidth=52;ctx.stroke();
+  ctx.beginPath();candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.strokeStyle='#f7fafc';ctx.lineWidth=46;ctx.stroke();
+  ctx.beginPath();candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.strokeStyle='#d6e0e6';ctx.lineWidth=40;ctx.stroke();
 
-  // Separate four-wide feeder channels. They stop outside the centre loop
-  // with a visible gap, so the preview flows never overlap the current rotation.
+  // Separate four-wide feeder channels. These are completely detached from
+  // the central loop; only a sweet that is actively topping up animates across the gap.
   for(const side of ['left','right']){
-    const x=side==='left'?18:402,mouth=side==='left'?28:392;
-    ctx.beginPath();ctx.moveTo(x,28);ctx.lineTo(x,188);ctx.quadraticCurveTo(x,232,mouth,262);
-    ctx.strokeStyle='#aebbc4';ctx.lineWidth=38;ctx.stroke();
-    ctx.beginPath();ctx.moveTo(x,28);ctx.lineTo(x,188);ctx.quadraticCurveTo(x,232,mouth,262);
-    ctx.strokeStyle='#f7fafc';ctx.lineWidth=34;ctx.stroke();
-    ctx.beginPath();ctx.moveTo(x,28);ctx.lineTo(x,188);ctx.quadraticCurveTo(x,232,mouth,262);
-    ctx.strokeStyle='#d6e0e6';ctx.lineWidth=30;ctx.stroke();
+    const x=side==='left'?38:382;
+    ctx.beginPath();ctx.moveTo(x,22);ctx.lineTo(x,300);
+    ctx.strokeStyle='#aebbc4';ctx.lineWidth=40;ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x,22);ctx.lineTo(x,300);
+    ctx.strokeStyle='#f7fafc';ctx.lineWidth=36;ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x,22);ctx.lineTo(x,300);
+    ctx.strokeStyle='#d6e0e6';ctx.lineWidth=32;ctx.stroke();
   }
   ctx.restore();
   roundedRect(185,317,50,43,15,'#778798','#f7fafc',4);
