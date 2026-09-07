@@ -75,8 +75,10 @@ candyPath=makeCandyPath();
 function candyPos(index,phase=state?.rotationPhase||0){
   const row=Math.floor(index/ROTATION_COLS),col=index%ROTATION_COLS;
   const rows=ROTATION_CAPACITY/ROTATION_COLS;
-  // Negative phase makes each successive row advance toward row 0, the outlet.
-  const rowProgress=((row-phase)%rows+rows)%rows;
+  // Row 0 starts one row before the outlet and reaches the outlet exactly
+  // when rotationPhase reaches 1. That keeps the visible outlet row and the
+  // logical row processed by processOutletRow() perfectly synchronised.
+  const rowProgress=((row+1-phase)%rows+rows)%rows;
   const pathProgress=rowProgress/rows;
   const exact=pathProgress*(candyPath.length-1);
   const i0=Math.floor(exact),i1=(i0+1)%candyPath.length,t=exact-i0;
