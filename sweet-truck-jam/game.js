@@ -24,12 +24,12 @@ let candyPath=[];
 const ROTATION_CAPACITY=144;
 const ROTATION_COLS=4;
 const FEEDER_COLS=4;
-const ROTATION_SPEED_ROWS=3.1;
+const ROTATION_SPEED_ROWS=4.0;
 const LOOP_ROWS=ROTATION_CAPACITY/ROTATION_COLS;
 if(LOOP_ROWS>36)throw new Error('Central rotation may not exceed 36 rows');
 const LEFT_JOIN_ROW=0;
-const RIGHT_JOIN_ROW=14;
-const OUTLET_ROW=5;
+const RIGHT_JOIN_ROW=16;
+const OUTLET_ROW=29;
 const OUTLET_SOURCE_ROW=(OUTLET_ROW-1+LOOP_ROWS)%LOOP_ROWS;
 const LOAD_MOUTH={x:210,y:344};
 const pointer={x:0,y:0};
@@ -59,33 +59,32 @@ function text(s,x,y,size,fill='#fff',align='center',weight=900){ctx.fillStyle=fi
 
 function makeCandyPath(){
   const pts=[];
-  // Compact irregular loop: broad lower sweep, right-hand return and inner hook,
-  // matching the reference layout much more closely than an oval ring.
   const segs=[
-    [[132,238],[175,238],[175,305],[210,305]],
-    [[210,305],[270,305],[315,295],[315,255]],
-    [[315,255],[315,230],[330,197],[288,197]],
-    [[288,197],[235,197],[270,105],[220,105]],
-    [[220,105],[185,105],[155,105],[155,125]],
-    [[155,125],[155,150],[145,170],[155,185]],
-    [[155,185],[180,185],[210,185],[235,185]],
-    [[235,185],[235,200],[245,215],[235,225]],
-    [[235,225],[200,240],[110,238],[132,238]]
+    [[120,220],[150,220],[140,125],[185,110]],
+    [[185,110],[220,95],[260,100],[275,125]],
+    [[275,125],[315,145],[340,240],[300,240]],
+    [[300,240],[275,240],[260,220],[245,220]],
+    [[245,220],[230,215],[215,200],[220,185]],
+    [[220,185],[210,195],[205,220],[215,235]],
+    [[215,235],[220,250],[245,250],[250,270]],
+    [[250,270],[260,290],[245,310],[210,310]],
+    [[210,310],[190,312],[165,305],[150,300]],
+    [[150,300],[120,285],[90,220],[120,220]]
   ];
   for(const seg of segs){
-    for(let i=0;i<40;i++){
-      const t=i/40,mt=1-t;
+    for(let i=0;i<48;i++){
+      const t=i/48,mt=1-t;
       pts.push({
         x:mt*mt*mt*seg[0][0]+3*mt*mt*t*seg[1][0]+3*mt*t*t*seg[2][0]+t*t*t*seg[3][0],
         y:mt*mt*mt*seg[0][1]+3*mt*mt*t*seg[1][1]+3*mt*t*t*seg[2][1]+t*t*t*seg[3][1]
       });
     }
   }
-  pts.push({x:132,y:238});
+  pts.push({x:120,y:220});
   const dense=[];let carry=0,prev=pts[0];dense.push(prev);
   for(let i=1;i<pts.length;i++){
     const p=pts[i],d=Math.hypot(p.x-prev.x,p.y-prev.y);carry+=d;
-    if(carry>=9){dense.push(p);carry=0}
+    if(carry>=7.5){dense.push(p);carry=0}
     prev=p;
   }
   return dense;
@@ -107,34 +106,34 @@ function candyPos(index,phase=state?.rotationPhase||0){
   return{x:p.x+p.nx*off,y:p.y+p.ny*off};
 }
 function feederGeometry(side){
-  const row=side==='left'?LEFT_JOIN_ROW:RIGHT_JOIN_ROW;
-  const join=loopPose(row,0);
-  const rise=side==='left'?54:50;
-  const startX=side==='left'?join.x-58:join.x+58;
-  const startY=join.y-rise;
-  return{
-    row,join,
-    start:{x:startX,y:startY},
-    c1:{x:startX,y:startY+34},
-    c2:{x:join.x-join.tx*36,y:join.y-join.ty*36}
-  };
+  if(side==='left'){
+    const join=loopPose(LEFT_JOIN_ROW,0);
+    return{join,start:{x:62,y:180},c1:{x:62,y:212},c2:{x:92,y:220}};
+  }
+  const join=loopPose(RIGHT_JOIN_ROW,0);
+  return{join,start:{x:358,y:196},c1:{x:358,y:228},c2:{x:330,y:240}};
 }
 function feederPos(side,index){
   const row=Math.floor(index/FEEDER_COLS),col=index%FEEDER_COLS,g=feederGeometry(side);
   const off=(col-(FEEDER_COLS-1)/2)*8.6;
   return{x:g.start.x+off,y:g.start.y-row*12.8};
 }
-function feederEntryPoint(side,col,u,targetIndex){
-  const from=feederPos(side,col),to=candyPos(targetIndex);
-  const row=Math.floor(targetIndex/ROTATION_COLS),lp=loopPose(row);
+function cubicPose(p0,p1,p2,p3,u){
   const q=1-u;
-  // Vertical start tangent + loop end tangent = a natural rounded ~90° turn.
-  const c1={x:from.x,y:from.y+34};
-  const c2={x:to.x-lp.tx*36,y:to.y-lp.ty*36};
-  return{
-    x:q*q*q*from.x+3*q*q*u*c1.x+3*q*u*u*c2.x+u*u*u*to.x,
-    y:q*q*q*from.y+3*q*q*u*c1.y+3*q*u*u*c2.y+u*u*u*to.y
-  };
+  const x=q*q*q*p0.x+3*q*q*u*p1.x+3*q*u*u*p2.x+u*u*u*p3.x;
+  const y=q*q*q*p0.y+3*q*q*u*p1.y+3*q*u*u*p2.y+u*u*u*p3.y;
+  let tx=3*q*q*(p1.x-p0.x)+6*q*u*(p2.x-p1.x)+3*u*u*(p3.x-p2.x);
+  let ty=3*q*q*(p1.y-p0.y)+6*q*u*(p2.y-p1.y)+3*u*u*(p3.y-p2.y);
+  const len=Math.hypot(tx,ty)||1;tx/=len;ty/=len;
+  return{x,y,tx,ty,nx:-ty,ny:tx};
+}
+function feederEntryPoint(side,col,u,targetIndex){
+  const g=feederGeometry(side);
+  const target=loopPose(Math.floor(targetIndex/ROTATION_COLS),state.rotationPhase);
+  const c2={x:target.x-target.tx*34,y:target.y-target.ty*34};
+  const p=cubicPose(g.start,g.c1,c2,target,u);
+  const off=(col-(FEEDER_COLS-1)/2)*8.6;
+  return{x:p.x+p.nx*off,y:p.y+p.ny*off};
 }
 
 function truckPoly(t,x=t.x,y=t.y,angle=t.angle){
@@ -334,11 +333,10 @@ function drawCrowdTrack(){
   ]){
     ctx.beginPath();
     candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
-    ctx.closePath();ctx.strokeStyle=stroke.c;ctx.lineWidth=stroke.w;ctx.stroke();
+    ctx.closePath();
+    ctx.strokeStyle=stroke.c;ctx.lineWidth=stroke.w;ctx.stroke();
   }
 
-  // The feeders are true branches of the loop: vertical queues meeting the
-  // circulation path through one smooth 90-degree bend.
   for(const side of ['left','right']){
     const g=feederGeometry(side);
     for(const stroke of [
@@ -347,26 +345,24 @@ function drawCrowdTrack(){
       {w:32,c:'#d6e0e6'}
     ]){
       ctx.beginPath();
-      ctx.moveTo(g.start.x,-70);
+      ctx.moveTo(g.start.x,-80);
       ctx.lineTo(g.start.x,g.start.y);
       ctx.bezierCurveTo(g.c1.x,g.c1.y,g.c2.x,g.c2.y,g.join.x,g.join.y);
       ctx.strokeStyle=stroke.c;ctx.lineWidth=stroke.w;ctx.stroke();
     }
   }
 
-  // Narrow single-file loading spur, as in the reference.
   const outlet=loopPose(OUTLET_ROW,0);
   for(const stroke of [
-    {w:29,c:'#aebbc4'},
-    {w:25,c:'#f7fafc'},
-    {w:20,c:'#778798'}
+    {w:25,c:'#aebbc4'},
+    {w:21,c:'#f7fafc'},
+    {w:16,c:'#778798'}
   ]){
     ctx.beginPath();
     ctx.moveTo(outlet.x,outlet.y);
-    ctx.bezierCurveTo(outlet.x,325,LOAD_MOUTH.x,330,LOAD_MOUTH.x,352);
+    ctx.bezierCurveTo(outlet.x,325,LOAD_MOUTH.x,330,LOAD_MOUTH.x,350);
     ctx.strokeStyle=stroke.c;ctx.lineWidth=stroke.w;ctx.stroke();
   }
-
   ctx.restore();
 }
 function drawParkingApron(){
@@ -407,7 +403,10 @@ function drawCandy(c,index){
 }
 function drawFeederCandy(c,side,index,dt){
   if(c.feedVisualIndex==null)c.feedVisualIndex=index;
-  c.feedVisualIndex+=(index-c.feedVisualIndex)*Math.min(1,dt*4.6);
+  const target=index,delta=target-c.feedVisualIndex;
+  const maxStep=ROTATION_SPEED_ROWS*ROTATION_COLS*conveyorSpeedMultiplier()*dt;
+  c.feedVisualIndex+=Math.sign(delta||0)*Math.min(Math.abs(delta),maxStep);
+
   const p=feederPos(side,c.feedVisualIndex),col=COLORS[c.color];
   ctx.save();ctx.translate(p.x,p.y);
   ctx.beginPath();ctx.arc(1.4,2.1,5.1,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.17)';ctx.fill();
@@ -419,13 +418,14 @@ function drawQueue(dt){
   for(let i=state.leftFeed.length-1;i>=0;i--)drawFeederCandy(state.leftFeed[i],'left',i,dt);
   for(let i=state.rightFeed.length-1;i>=0;i--)drawFeederCandy(state.rightFeed[i],'right',i,dt);
 
+  const rowStepSpeed=ROTATION_SPEED_ROWS*conveyorSpeedMultiplier();
   for(let i=state.rotation.length-1;i>=0;i--){
     const c=state.rotation[i];
     if(!c)continue;
 
-    if(c.entryT<1)c.entryT=Math.min(1,c.entryT+dt*.82);
     let p;
     if(c.entryT<1&&c.entrySide){
+      c.entryT=Math.min(1,c.entryT+dt*rowStepSpeed);
       p=feederEntryPoint(c.entrySide,i%4,ease(c.entryT),i);
     }else{
       p=candyPos(i);
@@ -536,7 +536,11 @@ function motionPose(m){
 function drawParticles(){
   for(const p of state.particles){
     const local=p.t-(p.delay||0);
-    if(local<0)continue;
+    if(local<0){
+      ctx.beginPath();ctx.arc(p.sx,p.sy,4.8,0,Math.PI*2);ctx.fillStyle=COLORS[p.color];ctx.fill();
+      ctx.beginPath();ctx.arc(p.sx-1.5,p.sy-1.5,1.3,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.48)';ctx.fill();
+      continue;
+    }
     const raw=clamp(local/p.duration,0,1),u=ease(raw),q=1-u;
     const c1x=p.c1x??p.cx??p.sx,c1y=p.c1y??p.cy??p.sy;
     const c2x=p.c2x??p.cx??p.tx,c2y=p.c2y??p.cy??p.ty;
@@ -630,12 +634,12 @@ function advanceLoopOneRow(){
           truckId:truck.id,
           color:c.color,
           sx:cp.x,sy:cp.y,
-          c1x:LOAD_MOUTH.x,c1y:LOAD_MOUTH.y-12,
-          c2x:lerp(LOAD_MOUTH.x,slot.x,.52),c2y:lerp(LOAD_MOUTH.y,slot.y-10,.58),
+          c1x:LOAD_MOUTH.x,c1y:LOAD_MOUTH.y-8,
+          c2x:lerp(LOAD_MOUTH.x,slot.x,.58),c2y:lerp(LOAD_MOUTH.y,slot.y-10,.64),
           tx:slot.x,ty:slot.y-10,
           t:0,
-          delay:i*.055,
-          duration:.44
+          delay:i*.052,
+          duration:.43
         });
       }
 
