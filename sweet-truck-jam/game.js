@@ -36,7 +36,7 @@ const SWEET_RADIUS=7;
 const CENTRAL_LANE_SPACING=13.2;
 const FEED_LANE_SPACING=13.0;
 const FEED_ROW_SPACING=14.5;
-const FEED_CORNER_RADIUS=36;
+const FEED_CORNER_RADIUS=42;
 const pointer={x:0,y:0};
 
 function resize(){
@@ -138,9 +138,9 @@ function candyPos(index,phase=state?.rotationPhase||0){
 }
 function feederGeometry(side){
   const join=loopPose(side==='left'?LEFT_JOIN_ROW:RIGHT_JOIN_ROW,0);
-  const outerX=side==='left'?24:396;
+  const outerX=side==='left'?6:414;
   const radius=FEED_CORNER_RADIUS;
-  const mouth={x:side==='left'?join.x-28:join.x+28,y:join.y};
+  const mouth={x:side==='left'?join.x-43:join.x+43,y:join.y};
   return{join,outerX,radius,mouth};
 }
 function feederRowPose(side,rowVisual){
@@ -194,8 +194,8 @@ function cubicPose(p0,p1,p2,p3,u){
 function feederEntryPoint(side,col,u,targetIndex){
   const start=feederRowPose(side,0);
   const target=loopPose(Math.floor(targetIndex/ROTATION_COLS),state.rotationPhase);
-  const c1={x:start.x+start.tx*38,y:start.y+start.ty*38};
-  const c2={x:target.x-target.tx*42,y:target.y-target.ty*42};
+  const c1={x:start.x+start.tx*28,y:start.y+start.ty*28};
+  const c2={x:target.x-target.tx*30,y:target.y-target.ty*30};
   const p=cubicPose(
     {x:start.x,y:start.y},c1,c2,{x:target.x,y:target.y},u
   );
@@ -409,8 +409,8 @@ function drawCrowdTrack(){
     const R=g.radius;
     const tangentX=side==='left'?g.outerX+R:g.outerX-R;
     const target=loopPose(side==='left'?LEFT_JOIN_ROW:RIGHT_JOIN_ROW,0);
-    const c1={x:g.mouth.x+(side==='left'?38:-38),y:g.mouth.y};
-    const c2={x:target.x-target.tx*42,y:target.y-target.ty*42};
+    const c1={x:g.mouth.x+(side==='left'?28:-28),y:g.mouth.y};
+    const c2={x:target.x-target.tx*30,y:target.y-target.ty*30};
 
     for(const stroke of [
       {w:68,c:'#aebbc4'},
