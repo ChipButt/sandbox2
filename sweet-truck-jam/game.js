@@ -108,27 +108,51 @@ function candyPos(index,phase=state?.rotationPhase||0){
   return{x:p.x+p.nx*off,y:p.y+p.ny*off};
 }
 function feederGeometry(side){
-  if(side==='left'){
-    const join=loopPose(LEFT_JOIN_ROW,0);
+  const join=loopPose(side==='left'?LEFT_JOIN_ROW:RIGHT_JOIN_ROW,0);
+  const outerX=side==='left'?62:358;
+  const radius=24;
+  const mouth={x:side==='left'?join.x-28:join.x+28,y:join.y};
+  return{join,outerX,radius,mouth};
+}
+function feederRowPose(side,rowVisual){
+  const g=feederGeometry(side);
+  const d=Math.max(0,rowVisual*12.8);
+  const R=g.radius;
+  const tangentX=side==='left'?g.outerX+R:g.outerX-R;
+  const horizontal=Math.max(0,side==='left'?g.mouth.x-tangentX:tangentX-g.mouth.x);
+  const arc=R*Math.PI/2;
+
+  if(d<=horizontal){
     return{
-      join,
-      start:{x:62,y:join.y-48},
-      elbow:{x:62,y:join.y},
-      c2:{x:join.x-32,y:join.y}
+      x:side==='left'?g.mouth.x-d:g.mouth.x+d,
+      y:g.mouth.y,
+      tx:side==='left'?1:-1,ty:0,
+      nx:0,ny:side==='left'?1:-1
     };
   }
-  const join=loopPose(RIGHT_JOIN_ROW,0);
-  return{
-    join,
-    start:{x:358,y:join.y-48},
-    elbow:{x:358,y:join.y},
-    c2:{x:join.x+32,y:join.y}
-  };
+
+  const q=d-horizontal;
+  if(q<=arc){
+    if(side==='left'){
+      const phi=Math.PI/2+q/R;
+      const cx=g.outerX+R,cy=g.mouth.y-R;
+      const tx=Math.sin(phi),ty=-Math.cos(phi);
+      return{x:cx+R*Math.cos(phi),y:cy+R*Math.sin(phi),tx,ty,nx:-ty,ny:tx};
+    }else{
+      const phi=Math.PI/2-q/R;
+      const cx=g.outerX-R,cy=g.mouth.y-R;
+      const tx=-Math.sin(phi),ty=Math.cos(phi);
+      return{x:cx+R*Math.cos(phi),y:cy+R*Math.sin(phi),tx,ty,nx:-ty,ny:tx};
+    }
+  }
+
+  const vertical=q-arc;
+  return{x:g.outerX,y:g.mouth.y-R-vertical,tx:0,ty:1,nx:-1,ny:0};
 }
 function feederRowPos(side,rowVisual,col){
-  const g=feederGeometry(side);
+  const p=feederRowPose(side,rowVisual);
   const off=(col-(FEEDER_COLS-1)/2)*8.6;
-  return{x:g.start.x+off,y:g.start.y-rowVisual*12.8};
+  return{x:p.x+p.nx*off,y:p.y+p.ny*off};
 }
 function cubicPose(p0,p1,p2,p3,u){
   const q=1-u;
@@ -140,18 +164,13 @@ function cubicPose(p0,p1,p2,p3,u){
   return{x,y,tx,ty,nx:-ty,ny:tx};
 }
 function feederEntryPoint(side,col,u,targetIndex){
-  const g=feederGeometry(side);
+  const start=feederRowPose(side,0);
   const target=loopPose(Math.floor(targetIndex/ROTATION_COLS),state.rotationPhase);
-  const c2={
-    x:side==='left'?target.x-32:target.x+32,
-    y:target.y
-  };
-
-  // The complete four-sweet row comes straight down, then rotates through
-  // one 90-degree side elbow into the central loop.
+  const c1={x:start.x+start.tx*22,y:start.y+start.ty*22};
+  const c2={x:target.x-target.tx*28,y:target.y-target.ty*28};
   const p=cubicPose(
-    g.start,
-    g.elbow,
+    {x:start.x,y:start.y},
+    c1,
     c2,
     {x:target.x,y:target.y},
     u
@@ -363,19 +382,23 @@ function drawCrowdTrack(){
 
   for(const side of ['left','right']){
     const g=feederGeometry(side);
+    const R=g.radius;
+    const tangentX=side==='left'?g.outerX+R:g.outerX-R;
+    const target=loopPose(side==='left'?LEFT_JOIN_ROW:RIGHT_JOIN_ROW,0);
+    const c1={x:g.mouth.x+(side==='left'?22:-22),y:g.mouth.y};
+    const c2={x:target.x-target.tx*28,y:target.y-target.ty*28};
+
     for(const stroke of [
       {w:40,c:'#aebbc4'},
       {w:36,c:'#f7fafc'},
       {w:32,c:'#d6e0e6'}
     ]){
       ctx.beginPath();
-      ctx.moveTo(g.start.x,-100);
-      ctx.lineTo(g.start.x,g.start.y);
-      ctx.bezierCurveTo(
-        g.elbow.x,g.elbow.y,
-        g.c2.x,g.c2.y,
-        g.join.x,g.join.y
-      );
+      ctx.moveTo(g.outerX,-100);
+      ctx.lineTo(g.outerX,g.mouth.y-R);
+      ctx.quadraticCurveTo(g.outerX,g.mouth.y,tangentX,g.mouth.y);
+      ctx.lineTo(g.mouth.x,g.mouth.y);
+      ctx.bezierCurveTo(c1.x,c1.y,c2.x,c2.y,target.x,target.y);
       ctx.strokeStyle=stroke.c;ctx.lineWidth=stroke.w;ctx.stroke();
     }
   }
