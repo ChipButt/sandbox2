@@ -391,19 +391,12 @@ function drawBackground(){
   drawCrowdTrack(); drawParkingApron(); drawJamField();
 }
 function drawCrowdTrack(){
-  ctx.save();ctx.lineCap='round';ctx.lineJoin='round';
+  ctx.save();
+  ctx.lineJoin='round';
 
-  for(const stroke of [
-    {w:72,c:'#aebbc4'},
-    {w:66,c:'#f7fafc'},
-    {w:60,c:'#d6e0e6'}
-  ]){
-    ctx.beginPath();
-    candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
-    ctx.closePath();
-    ctx.strokeStyle=stroke.c;ctx.lineWidth=stroke.w;ctx.stroke();
-  }
-
+  // Draw feeder tubes first so the central loop masks the connector overlap.
+  // Use butt caps so the feeder endpoint itself cannot create a rounded bulb.
+  ctx.lineCap='butt';
   for(const side of ['left','right']){
     const g=feederGeometry(side);
     const R=g.radius;
@@ -425,6 +418,20 @@ function drawCrowdTrack(){
       ctx.bezierCurveTo(c1.x,c1.y,c2.x,c2.y,target.x,target.y);
       ctx.strokeStyle=stroke.c;ctx.lineWidth=stroke.w;ctx.stroke();
     }
+  }
+
+  // Draw the central loop over the feeder endpoints. This leaves only the
+  // intended opening/connection visible and removes the overlapping bulb.
+  ctx.lineCap='round';
+  for(const stroke of [
+    {w:72,c:'#aebbc4'},
+    {w:66,c:'#f7fafc'},
+    {w:60,c:'#d6e0e6'}
+  ]){
+    ctx.beginPath();
+    candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+    ctx.closePath();
+    ctx.strokeStyle=stroke.c;ctx.lineWidth=stroke.w;ctx.stroke();
   }
 
   const outlet=loopPose(OUTLET_ROW,0);
