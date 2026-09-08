@@ -29,7 +29,7 @@ const LOOP_ROWS=ROTATION_CAPACITY/ROTATION_COLS;
 if(LOOP_ROWS>36)throw new Error('Central rotation may not exceed 36 rows');
 const LEFT_JOIN_ROW=0;
 const RIGHT_JOIN_ROW=5;
-const OUTLET_ROW=18;
+const OUTLET_ROW=20;
 const OUTLET_SOURCE_ROW=(OUTLET_ROW-1+LOOP_ROWS)%LOOP_ROWS;
 const LOAD_MOUTH={x:210,y:344};
 const pointer={x:0,y:0};
@@ -112,7 +112,7 @@ function feederGeometry(side){
     const join=loopPose(LEFT_JOIN_ROW,0); // top-left, tangent right
     return{
       join,
-      start:{x:62,y:78},
+      start:{x:62,y:110},
       elbow:{x:62,y:125},
       c1:{x:62,y:125},
       c2:{x:118,y:125}
@@ -121,7 +121,7 @@ function feederGeometry(side){
   const join=loopPose(RIGHT_JOIN_ROW,0); // top-right, reached from the right
   return{
     join,
-    start:{x:358,y:78},
+    start:{x:358,y:110},
     elbow:{x:358,y:125},
     c1:{x:358,y:125},
     c2:{x:302,y:125}
