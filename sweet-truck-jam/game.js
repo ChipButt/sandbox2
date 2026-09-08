@@ -27,9 +27,9 @@ const FEEDER_COLS=4;
 const ROTATION_SPEED_ROWS=4.0;
 const LOOP_ROWS=ROTATION_CAPACITY/ROTATION_COLS;
 if(LOOP_ROWS>36)throw new Error('Central rotation may not exceed 36 rows');
-const LEFT_JOIN_ROW=17;
+const LEFT_JOIN_ROW=16;
 const RIGHT_JOIN_ROW=0;
-const OUTLET_ROW=9;
+const OUTLET_ROW=8;
 const OUTLET_SOURCE_ROW=(OUTLET_ROW-1+LOOP_ROWS)%LOOP_ROWS;
 const LOAD_MOUTH={x:210,y:344};
 const SWEET_RADIUS=7;
@@ -63,39 +63,37 @@ function roundedRect(x,y,w,h,r,fill,stroke,line=1){
 function text(s,x,y,size,fill='#fff',align='center',weight=900){ctx.fillStyle=fill;ctx.textAlign=align;ctx.textBaseline='middle';ctx.font=`${weight} ${size}px ui-rounded,system-ui,-apple-system`;ctx.fillText(s,x,y)}
 
 function makeCandyPath(){
-  // Traced from the supplied reference frame rather than invented from a
-  // generic circle. The loop has the reference's broad lower bowl, tight
-  // left neck, rounded upper cap and inward right-hand hook.
+  // Centreline traced directly from the user's green annotation.
+  // Coordinates are the traced outline normalized into the game canvas.
   const anchors=[
-    [315,220],
-    [315,245],
-    [300,270],
-    [265,292],
-    [220,305],
-    [170,300],
-    [130,275],
-    [105,240],
-    [112,210],
-    [135,190],
-    [150,180],
-    [150,145],
-    [160,115],
-    [190,100],
-    [225,102],
-    [250,115],
-    [270,130],
-    [283,150],
-    [287,172],
-    [285,190],
-    [292,205],
-    [304,215],
-    [315,220]
+    [315.0,203.7],
+    [313.2,249.3],
+    [251.7,295.9],
+    [216.6,305.0],
+    [145.1,305.0],
+    [120.5,289.0],
+    [105.0,248.8],
+    [113.7,239.3],
+    [113.7,194.5],
+    [129.1,136.1],
+    [142.8,116.5],
+    [178.3,95.5],
+    [214.8,95.0],
+    [229.4,102.3],
+    [241.2,120.6],
+    [246.7,174.4],
+    [302.2,185.8]
   ].map(([x,y])=>({x,y}));
 
   const raw=[];
   const steps=24;
-  for(let i=0;i<anchors.length-1;i++){
-    const p0=anchors[Math.max(0,i-1)],p1=anchors[i],p2=anchors[i+1],p3=anchors[Math.min(anchors.length-1,i+2)];
+  const n=anchors.length;
+  for(let i=0;i<n;i++){
+    const p0=anchors[(i-1+n)%n];
+    const p1=anchors[i];
+    const p2=anchors[(i+1)%n];
+    const p3=anchors[(i+2)%n];
+
     for(let j=0;j<steps;j++){
       const t=j/steps,t2=t*t,t3=t2*t;
       raw.push({
@@ -104,8 +102,10 @@ function makeCandyPath(){
       });
     }
   }
-  raw.push(anchors[anchors.length-1]);
+  raw.push({...raw[0]});
 
+  // Resample by physical distance so all 36 rows travel at an even speed
+  // around the traced outline, regardless of local curvature.
   const cumulative=[0];
   for(let i=1;i<raw.length;i++){
     cumulative.push(cumulative[i-1]+Math.hypot(raw[i].x-raw[i-1].x,raw[i].y-raw[i-1].y));
@@ -114,10 +114,12 @@ function makeCandyPath(){
   const dense=[];
   const sampleCount=240;
   let cursor=1;
+
   for(let n=0;n<sampleCount;n++){
     const target=n/(sampleCount-1)*total;
     while(cursor<cumulative.length-1&&cumulative[cursor]<target)cursor++;
-    const a=raw[cursor-1],b=raw[cursor],span=Math.max(.001,cumulative[cursor]-cumulative[cursor-1]);
+    const a=raw[cursor-1],b=raw[cursor];
+    const span=Math.max(.001,cumulative[cursor]-cumulative[cursor-1]);
     const u=(target-cumulative[cursor-1])/span;
     dense.push({x:lerp(a.x,b.x,u),y:lerp(a.y,b.y,u)});
   }
