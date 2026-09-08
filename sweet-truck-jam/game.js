@@ -28,8 +28,8 @@ const ROTATION_SPEED_ROWS=4.0;
 const LOOP_ROWS=ROTATION_CAPACITY/ROTATION_COLS;
 if(LOOP_ROWS>36)throw new Error('Central rotation may not exceed 36 rows');
 const LEFT_JOIN_ROW=0;
-const RIGHT_JOIN_ROW=16;
-const OUTLET_ROW=29;
+const RIGHT_JOIN_ROW=5;
+const OUTLET_ROW=18;
 const OUTLET_SOURCE_ROW=(OUTLET_ROW-1+LOOP_ROWS)%LOOP_ROWS;
 const LOAD_MOUTH={x:210,y:344};
 const pointer={x:0,y:0};
@@ -59,32 +59,34 @@ function text(s,x,y,size,fill='#fff',align='center',weight=900){ctx.fillStyle=fi
 
 function makeCandyPath(){
   const pts=[];
+  // Clean rounded central loop: no spiral, no crossings, one clear opening.
+  // Start at the top-left straight so the left feeder can enter with a true 90° elbow.
   const segs=[
-    [[120,220],[150,220],[140,125],[185,110]],
-    [[185,110],[220,95],[260,100],[275,125]],
-    [[275,125],[315,145],[340,240],[300,240]],
-    [[300,240],[275,240],[260,220],[245,220]],
-    [[245,220],[230,215],[215,200],[220,185]],
-    [[220,185],[210,195],[205,220],[215,235]],
-    [[215,235],[220,250],[245,250],[250,270]],
-    [[250,270],[260,290],[245,310],[210,310]],
-    [[210,310],[190,312],[165,305],[150,300]],
-    [[150,300],[120,285],[90,220],[120,220]]
+    [[170,125],[205,125],[225,125],[250,125]],
+    [[250,125],[278,125],[295,142],[295,170]],
+    [[295,170],[295,205],[295,225],[295,250]],
+    [[295,250],[295,278],[278,295],[250,295]],
+    [[250,295],[220,295],[195,295],[170,295]],
+    [[170,295],[142,295],[125,278],[125,250]],
+    [[125,250],[125,220],[125,195],[125,170]],
+    [[125,170],[125,142],[142,125],[170,125]]
   ];
   for(const seg of segs){
-    for(let i=0;i<48;i++){
-      const t=i/48,mt=1-t;
+    for(let i=0;i<40;i++){
+      const t=i/40,mt=1-t;
       pts.push({
         x:mt*mt*mt*seg[0][0]+3*mt*mt*t*seg[1][0]+3*mt*t*t*seg[2][0]+t*t*t*seg[3][0],
         y:mt*mt*mt*seg[0][1]+3*mt*mt*t*seg[1][1]+3*mt*t*t*seg[2][1]+t*t*t*seg[3][1]
       });
     }
   }
-  pts.push({x:120,y:220});
+  pts.push({x:170,y:125});
+
+  // Resample to nearly uniform distance so 36 rows stay evenly spaced.
   const dense=[];let carry=0,prev=pts[0];dense.push(prev);
   for(let i=1;i<pts.length;i++){
     const p=pts[i],d=Math.hypot(p.x-prev.x,p.y-prev.y);carry+=d;
-    if(carry>=7.5){dense.push(p);carry=0}
+    if(carry>=7.2){dense.push(p);carry=0}
     prev=p;
   }
   return dense;
@@ -107,16 +109,28 @@ function candyPos(index,phase=state?.rotationPhase||0){
 }
 function feederGeometry(side){
   if(side==='left'){
-    const join=loopPose(LEFT_JOIN_ROW,0);
-    return{join,start:{x:62,y:180},c1:{x:62,y:212},c2:{x:92,y:220}};
+    const join=loopPose(LEFT_JOIN_ROW,0); // top-left, tangent right
+    return{
+      join,
+      start:{x:62,y:78},
+      elbow:{x:62,y:125},
+      c1:{x:62,y:125},
+      c2:{x:118,y:125}
+    };
   }
-  const join=loopPose(RIGHT_JOIN_ROW,0);
-  return{join,start:{x:358,y:196},c1:{x:358,y:228},c2:{x:330,y:240}};
+  const join=loopPose(RIGHT_JOIN_ROW,0); // top-right, reached from the right
+  return{
+    join,
+    start:{x:358,y:78},
+    elbow:{x:358,y:125},
+    c1:{x:358,y:125},
+    c2:{x:302,y:125}
+  };
 }
-function feederPos(side,index){
-  const row=Math.floor(index/FEEDER_COLS),col=index%FEEDER_COLS,g=feederGeometry(side);
+function feederRowPos(side,rowVisual,col){
+  const g=feederGeometry(side);
   const off=(col-(FEEDER_COLS-1)/2)*8.6;
-  return{x:g.start.x+off,y:g.start.y-row*12.8};
+  return{x:g.start.x+off,y:g.start.y-rowVisual*12.8};
 }
 function cubicPose(p0,p1,p2,p3,u){
   const q=1-u;
@@ -130,8 +144,17 @@ function cubicPose(p0,p1,p2,p3,u){
 function feederEntryPoint(side,col,u,targetIndex){
   const g=feederGeometry(side);
   const target=loopPose(Math.floor(targetIndex/ROTATION_COLS),state.rotationPhase);
-  const c2={x:target.x-target.tx*34,y:target.y-target.ty*34};
-  const p=cubicPose(g.start,g.c1,c2,target,u);
+
+  // The whole row travels down the same vertical tube and rotates through one
+  // quarter-turn elbow together. The normal vector rotates with the corner,
+  // so all four sweets remain a rigid four-abreast row.
+  const p=cubicPose(
+    g.start,
+    g.elbow,
+    g.c2,
+    {x:target.x,y:target.y},
+    u
+  );
   const off=(col-(FEEDER_COLS-1)/2)*8.6;
   return{x:p.x+p.nx*off,y:p.y+p.ny*off};
 }
@@ -265,8 +288,8 @@ function splitSweetPools(gen){
   const remainingRows=all.length/4;
   const leftRows=Math.ceil(remainingRows/2);
   const leftFeed=all.splice(0,leftRows*4),rightFeed=all;
-  leftFeed.forEach((c,i)=>c.feedVisualIndex=i);
-  rightFeed.forEach((c,i)=>c.feedVisualIndex=i);
+  for(let r=0;r<leftFeed.length/4;r++)leftFeed[r*4].feedVisualRow=r;
+  for(let r=0;r<rightFeed.length/4;r++)rightFeed[r*4].feedVisualRow=r;
 
   if(!loopRowsAreValid(rotation)||!rowsAreValid(leftFeed)||!rowsAreValid(rightFeed))throw new Error('Sweet pool row integrity failed');
   return{rotation,leftFeed,rightFeed};
@@ -289,16 +312,15 @@ function gapAtRow(rowIndex){
 function insertFeederRow(rowIndex,side){
   const source=side==='left'?state.leftFeed:state.rightFeed;
   if(source.length<4||!gapAtRow(rowIndex))return false;
+
   const row=source.splice(0,4);
   if(row.length!==4||row.some(c=>c.color!==row[0].color))throw new Error('Feeder supplied an invalid row');
 
   const base=rowIndex*ROTATION_COLS;
-  for(let i=0;i<4;i++){
-    const c=row[i];
-    c.entryT=0;
-    c.entrySide=side;
-    state.rotation[base+i]=c;
-  }
+  row[0].entryT=0;
+  row[0].entrySide=side;
+
+  for(let i=0;i<4;i++)state.rotation[base+i]=row[i];
   return true;
 }
 function processFeederJunctions(){
@@ -311,6 +333,7 @@ function processFeederJunctions(){
 function start(n){
   level=n;state=newState(n);
   if(!loopRowsAreValid(state.rotation)||!rowsAreValid(state.leftFeed)||!rowsAreValid(state.rightFeed))throw new Error('Level started with an invalid sweet row');
+  if(state.rotation.length!==144)throw new Error('Central loop must contain exactly 36 row slots');
   overlay.classList.add('hidden');saveLevel();showToast('Tap a truck with a clear path');
 }
 function saveLevel(){try{localStorage.setItem('sweet-fever-level',String(level))}catch(_){}}
@@ -345,9 +368,13 @@ function drawCrowdTrack(){
       {w:32,c:'#d6e0e6'}
     ]){
       ctx.beginPath();
-      ctx.moveTo(g.start.x,-80);
-      ctx.lineTo(g.start.x,g.start.y);
-      ctx.bezierCurveTo(g.c1.x,g.c1.y,g.c2.x,g.c2.y,g.join.x,g.join.y);
+      ctx.moveTo(g.start.x,-100);
+      ctx.lineTo(g.start.x,g.elbow.y);
+      ctx.bezierCurveTo(
+        g.c1.x,g.c1.y,
+        g.c2.x,g.c2.y,
+        g.join.x,g.join.y
+      );
       ctx.strokeStyle=stroke.c;ctx.lineWidth=stroke.w;ctx.stroke();
     }
   }
@@ -360,7 +387,7 @@ function drawCrowdTrack(){
   ]){
     ctx.beginPath();
     ctx.moveTo(outlet.x,outlet.y);
-    ctx.bezierCurveTo(outlet.x,325,LOAD_MOUTH.x,330,LOAD_MOUTH.x,350);
+    ctx.bezierCurveTo(outlet.x,315,LOAD_MOUTH.x,330,LOAD_MOUTH.x,350);
     ctx.strokeStyle=stroke.c;ctx.lineWidth=stroke.w;ctx.stroke();
   }
   ctx.restore();
@@ -401,42 +428,59 @@ function drawCandy(c,index){
   ctx.save();ctx.translate(p.x,p.y);ctx.beginPath();ctx.arc(1.5,2.3,5.3,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.18)';ctx.fill();ctx.beginPath();ctx.arc(0,0,5.2,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();
   ctx.beginPath();ctx.arc(-1.7,-1.8,1.6,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.45)';ctx.fill();ctx.restore();
 }
-function drawFeederCandy(c,side,index,dt){
-  if(c.feedVisualIndex==null)c.feedVisualIndex=index;
-  const target=index,delta=target-c.feedVisualIndex;
-  const maxStep=ROTATION_SPEED_ROWS*ROTATION_COLS*conveyorSpeedMultiplier()*dt;
-  c.feedVisualIndex+=Math.sign(delta||0)*Math.min(Math.abs(delta),maxStep);
-
-  const p=feederPos(side,c.feedVisualIndex),col=COLORS[c.color];
+function drawSweetAt(p,color,r=5.1){
   ctx.save();ctx.translate(p.x,p.y);
-  ctx.beginPath();ctx.arc(1.4,2.1,5.1,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.17)';ctx.fill();
-  ctx.beginPath();ctx.arc(0,0,5,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();
+  ctx.beginPath();ctx.arc(1.4,2.1,r+.1,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.17)';ctx.fill();
+  ctx.beginPath();ctx.arc(0,0,r,0,Math.PI*2);ctx.fillStyle=COLORS[color];ctx.fill();
   ctx.beginPath();ctx.arc(-1.6,-1.7,1.45,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.43)';ctx.fill();
   ctx.restore();
 }
+function drawFeederRows(feed,side,dt){
+  const rowCount=Math.floor(feed.length/4);
+  const rowSpeed=ROTATION_SPEED_ROWS*conveyorSpeedMultiplier();
+
+  for(let r=rowCount-1;r>=0;r--){
+    const row=feed.slice(r*4,r*4+4);
+    if(row.length!==4)continue;
+    const leader=row[0];
+
+    if(leader.feedVisualRow==null)leader.feedVisualRow=r;
+    const delta=r-leader.feedVisualRow;
+    const maxMove=rowSpeed*dt;
+    leader.feedVisualRow+=Math.sign(delta||0)*Math.min(Math.abs(delta),maxMove);
+
+    // One shared visual-row position for all four sweets. No per-sweet feeder motion.
+    for(let col=0;col<4;col++){
+      const p=feederRowPos(side,leader.feedVisualRow,col);
+      drawSweetAt(p,row[col].color,5);
+    }
+  }
+}
 function drawQueue(dt){
-  for(let i=state.leftFeed.length-1;i>=0;i--)drawFeederCandy(state.leftFeed[i],'left',i,dt);
-  for(let i=state.rightFeed.length-1;i>=0;i--)drawFeederCandy(state.rightFeed[i],'right',i,dt);
+  drawFeederRows(state.leftFeed,'left',dt);
+  drawFeederRows(state.rightFeed,'right',dt);
 
-  const rowStepSpeed=ROTATION_SPEED_ROWS*conveyorSpeedMultiplier();
-  for(let i=state.rotation.length-1;i>=0;i--){
-    const c=state.rotation[i];
-    if(!c)continue;
+  const rowSpeed=ROTATION_SPEED_ROWS*conveyorSpeedMultiplier();
 
-    let p;
-    if(c.entryT<1&&c.entrySide){
-      c.entryT=Math.min(1,c.entryT+dt*rowStepSpeed);
-      p=feederEntryPoint(c.entrySide,i%4,ease(c.entryT),i);
-    }else{
-      p=candyPos(i);
+  // Draw the central loop row-by-row so four sweets can never desynchronise.
+  for(let r=LOOP_ROWS-1;r>=0;r--){
+    const base=r*4,row=state.rotation.slice(base,base+4);
+    if(row.length!==4||row.every(c=>c==null))continue;
+    if(row.some(c=>c==null))throw new Error('Partial central row');
+
+    const leader=row[0];
+    let entryU=null;
+    if(leader.entryT<1&&leader.entrySide){
+      leader.entryT=Math.min(1,leader.entryT+dt*rowSpeed);
+      entryU=ease(leader.entryT);
     }
 
-    const col=COLORS[c.color];
-    ctx.save();ctx.translate(p.x,p.y);
-    ctx.beginPath();ctx.arc(1.5,2.3,5.3,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.18)';ctx.fill();
-    ctx.beginPath();ctx.arc(0,0,5.2,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();
-    ctx.beginPath();ctx.arc(-1.7,-1.8,1.6,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.45)';ctx.fill();
-    ctx.restore();
+    for(let col=0;col<4;col++){
+      const p=entryU==null
+        ? candyPos(base+col)
+        : feederEntryPoint(leader.entrySide,col,entryU,base+col);
+      drawSweetAt(p,row[col].color,5.2);
+    }
   }
 }
 
