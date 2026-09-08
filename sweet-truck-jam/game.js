@@ -67,10 +67,10 @@ function makeCandyPath(){
   // generic circle. The loop has the reference's broad lower bowl, tight
   // left neck, rounded upper cap and inward right-hand hook.
   const anchors=[
-    [315,190],
-    [320,225],
-    [305,265],
-    [270,290],
+    [315,220],
+    [315,245],
+    [300,270],
+    [265,292],
     [220,305],
     [170,300],
     [130,275],
@@ -83,15 +83,13 @@ function makeCandyPath(){
     [190,100],
     [225,102],
     [250,115],
-    [260,135],
-    [266,152],
-    [264,170],
-    [266,188],
-    [278,204],
-    [296,214],
-    [312,212],
-    [321,202],
-    [315,190]
+    [270,130],
+    [283,150],
+    [287,172],
+    [285,190],
+    [292,205],
+    [304,215],
+    [315,220]
   ].map(([x,y])=>({x,y}));
 
   const raw=[];
