@@ -27,9 +27,9 @@ const FEEDER_COLS=4;
 const ROTATION_SPEED_ROWS=4.0;
 const LOOP_ROWS=ROTATION_CAPACITY/ROTATION_COLS;
 if(LOOP_ROWS>36)throw new Error('Central rotation may not exceed 36 rows');
-const LEFT_JOIN_ROW=21;
-const RIGHT_JOIN_ROW=11;
-const OUTLET_ROW=17;
+const LEFT_JOIN_ROW=17;
+const RIGHT_JOIN_ROW=0;
+const OUTLET_ROW=9;
 const OUTLET_SOURCE_ROW=(OUTLET_ROW-1+LOOP_ROWS)%LOOP_ROWS;
 const LOAD_MOUTH={x:210,y:344};
 const SWEET_RADIUS=7;
@@ -63,37 +63,64 @@ function roundedRect(x,y,w,h,r,fill,stroke,line=1){
 function text(s,x,y,size,fill='#fff',align='center',weight=900){ctx.fillStyle=fill;ctx.textAlign=align;ctx.textBaseline='middle';ctx.font=`${weight} ${size}px ui-rounded,system-ui,-apple-system`;ctx.fillText(s,x,y)}
 
 function makeCandyPath(){
-  const pts=[];
-  // Reference-video central route: compact G/kidney loop with the narrow inner
-  // tongue and broad lower sweep visible in the recording.
-  const segs=[
-    [[150,110],[180,105],[205,105],[230,110]],
-    [[230,110],[250,115],[265,135],[275,150]],
-    [[275,150],[295,150],[310,150],[315,170]],
-    [[315,170],[320,205],[320,235],[315,250]],
-    [[315,250],[305,280],[265,300],[215,305]],
-    [[215,305],[170,307],[130,275],[100,230]],
-    [[100,230],[135,230],[185,245],[225,238]],
-    [[225,238],[245,235],[242,210],[235,190]],
-    [[235,190],[210,190],[180,190],[155,190]],
-    [[155,190],[145,175],[148,135],[150,110]]
-  ];
-  for(const seg of segs){
-    for(let i=0;i<48;i++){
-      const t=i/48,mt=1-t;
-      pts.push({
-        x:mt*mt*mt*seg[0][0]+3*mt*mt*t*seg[1][0]+3*mt*t*t*seg[2][0]+t*t*t*seg[3][0],
-        y:mt*mt*mt*seg[0][1]+3*mt*mt*t*seg[1][1]+3*mt*t*t*seg[2][1]+t*t*t*seg[3][1]
+  // Traced from the supplied reference frame rather than invented from a
+  // generic circle. The loop has the reference's broad lower bowl, tight
+  // left neck, rounded upper cap and inward right-hand hook.
+  const anchors=[
+    [315,190],
+    [320,225],
+    [305,265],
+    [270,290],
+    [220,305],
+    [170,300],
+    [130,275],
+    [105,240],
+    [112,210],
+    [135,190],
+    [150,180],
+    [150,145],
+    [160,115],
+    [190,100],
+    [225,102],
+    [250,115],
+    [260,135],
+    [250,155],
+    [238,175],
+    [245,190],
+    [270,200],
+    [295,200],
+    [310,190],
+    [315,190]
+  ].map(([x,y])=>({x,y}));
+
+  const raw=[];
+  const steps=24;
+  for(let i=0;i<anchors.length-1;i++){
+    const p0=anchors[Math.max(0,i-1)],p1=anchors[i],p2=anchors[i+1],p3=anchors[Math.min(anchors.length-1,i+2)];
+    for(let j=0;j<steps;j++){
+      const t=j/steps,t2=t*t,t3=t2*t;
+      raw.push({
+        x:.5*((2*p1.x)+(-p0.x+p2.x)*t+(2*p0.x-5*p1.x+4*p2.x-p3.x)*t2+(-p0.x+3*p1.x-3*p2.x+p3.x)*t3),
+        y:.5*((2*p1.y)+(-p0.y+p2.y)*t+(2*p0.y-5*p1.y+4*p2.y-p3.y)*t2+(-p0.y+3*p1.y-3*p2.y+p3.y)*t3)
       });
     }
   }
-  pts.push({x:150,y:110});
+  raw.push(anchors[anchors.length-1]);
 
-  const dense=[];let carry=0,prev=pts[0];dense.push(prev);
-  for(let i=1;i<pts.length;i++){
-    const p=pts[i],d=Math.hypot(p.x-prev.x,p.y-prev.y);carry+=d;
-    if(carry>=6.5){dense.push(p);carry=0}
-    prev=p;
+  const cumulative=[0];
+  for(let i=1;i<raw.length;i++){
+    cumulative.push(cumulative[i-1]+Math.hypot(raw[i].x-raw[i-1].x,raw[i].y-raw[i-1].y));
+  }
+  const total=cumulative[cumulative.length-1];
+  const dense=[];
+  const sampleCount=240;
+  let cursor=1;
+  for(let n=0;n<sampleCount;n++){
+    const target=n/(sampleCount-1)*total;
+    while(cursor<cumulative.length-1&&cumulative[cursor]<target)cursor++;
+    const a=raw[cursor-1],b=raw[cursor],span=Math.max(.001,cumulative[cursor]-cumulative[cursor-1]);
+    const u=(target-cumulative[cursor-1])/span;
+    dense.push({x:lerp(a.x,b.x,u),y:lerp(a.y,b.y,u)});
   }
   return dense;
 }
