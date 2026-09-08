@@ -27,18 +27,16 @@ const FEEDER_COLS=4;
 const ROTATION_SPEED_ROWS=4.0;
 const LOOP_ROWS=ROTATION_CAPACITY/ROTATION_COLS;
 if(LOOP_ROWS>36)throw new Error('Central rotation may not exceed 36 rows');
-const LEFT_JOIN_ROW=29;
+const LEFT_JOIN_ROW=21;
 const RIGHT_JOIN_ROW=11;
-const OUTLET_ROW=20;
+const OUTLET_ROW=17;
 const OUTLET_SOURCE_ROW=(OUTLET_ROW-1+LOOP_ROWS)%LOOP_ROWS;
 const LOAD_MOUTH={x:210,y:344};
-const SWEET_SCALE=2;
-const LOOP_GEOM_SCALE=1.2;
-const CENTRAL_LANE_SPACING=10.8*SWEET_SCALE;
-const FEED_LANE_SPACING=8.6*SWEET_SCALE;
-const FEED_ROW_SPACING=12.8*SWEET_SCALE;
-const FEED_CORNER_RADIUS=24*SWEET_SCALE;
-const VISIBLE_FEED_ROWS=5;
+const SWEET_RADIUS=7;
+const CENTRAL_LANE_SPACING=13.2;
+const FEED_LANE_SPACING=13.0;
+const FEED_ROW_SPACING=14.5;
+const FEED_CORNER_RADIUS=32;
 const pointer={x:0,y:0};
 
 function resize(){
@@ -66,40 +64,38 @@ function text(s,x,y,size,fill='#fff',align='center',weight=900){ctx.fillStyle=fi
 
 function makeCandyPath(){
   const pts=[];
-  // Clean rounded central loop: no spiral, no crossings, one clear opening.
-  // Start at the top-left straight so the left feeder can enter with a true 90° elbow.
+  // Reference-video central route: compact G/kidney loop with the narrow inner
+  // tongue and broad lower sweep visible in the recording.
   const segs=[
-    [[170,125],[205,125],[225,125],[250,125]],
-    [[250,125],[278,125],[295,142],[295,170]],
-    [[295,170],[295,205],[295,225],[295,250]],
-    [[295,250],[295,278],[278,295],[250,295]],
-    [[250,295],[220,295],[195,295],[170,295]],
-    [[170,295],[142,295],[125,278],[125,250]],
-    [[125,250],[125,220],[125,195],[125,170]],
-    [[125,170],[125,142],[142,125],[170,125]]
+    [[150,110],[180,105],[205,105],[230,110]],
+    [[230,110],[250,115],[265,135],[275,150]],
+    [[275,150],[295,150],[310,150],[315,170]],
+    [[315,170],[320,205],[320,235],[315,250]],
+    [[315,250],[305,280],[265,300],[215,305]],
+    [[215,305],[170,307],[130,275],[100,230]],
+    [[100,230],[135,230],[185,245],[225,238]],
+    [[225,238],[245,235],[242,210],[235,190]],
+    [[235,190],[210,190],[180,190],[155,190]],
+    [[155,190],[145,175],[148,135],[150,110]]
   ];
   for(const seg of segs){
-    for(let i=0;i<40;i++){
-      const t=i/40,mt=1-t;
+    for(let i=0;i<48;i++){
+      const t=i/48,mt=1-t;
       pts.push({
         x:mt*mt*mt*seg[0][0]+3*mt*mt*t*seg[1][0]+3*mt*t*t*seg[2][0]+t*t*t*seg[3][0],
         y:mt*mt*mt*seg[0][1]+3*mt*mt*t*seg[1][1]+3*mt*t*t*seg[2][1]+t*t*t*seg[3][1]
       });
     }
   }
-  pts.push({x:170,y:125});
+  pts.push({x:150,y:110});
 
-  // Resample to nearly uniform distance so 36 rows stay evenly spaced.
   const dense=[];let carry=0,prev=pts[0];dense.push(prev);
   for(let i=1;i<pts.length;i++){
     const p=pts[i],d=Math.hypot(p.x-prev.x,p.y-prev.y);carry+=d;
-    if(carry>=7.2){dense.push(p);carry=0}
+    if(carry>=6.5){dense.push(p);carry=0}
     prev=p;
   }
-  return dense.map(p=>({
-    x:210+(p.x-210)*LOOP_GEOM_SCALE,
-    y:210+(p.y-210)*LOOP_GEOM_SCALE
-  }));
+  return dense;
 }
 candyPath=makeCandyPath();
 
@@ -119,9 +115,9 @@ function candyPos(index,phase=state?.rotationPhase||0){
 }
 function feederGeometry(side){
   const join=loopPose(side==='left'?LEFT_JOIN_ROW:RIGHT_JOIN_ROW,0);
-  const outerX=side==='left'?10:410;
+  const outerX=side==='left'?58:362;
   const radius=FEED_CORNER_RADIUS;
-  const mouth={x:side==='left'?join.x-56:join.x+56,y:join.y};
+  const mouth={x:side==='left'?join.x-20:join.x+20,y:join.y};
   return{join,outerX,radius,mouth};
 }
 function feederRowPose(side,rowVisual){
@@ -148,12 +144,11 @@ function feederRowPose(side,rowVisual){
       const cx=g.outerX+R,cy=g.mouth.y-R;
       const tx=Math.sin(phi),ty=-Math.cos(phi);
       return{x:cx+R*Math.cos(phi),y:cy+R*Math.sin(phi),tx,ty,nx:-ty,ny:tx};
-    }else{
-      const phi=Math.PI/2-q/R;
-      const cx=g.outerX-R,cy=g.mouth.y-R;
-      const tx=-Math.sin(phi),ty=Math.cos(phi);
-      return{x:cx+R*Math.cos(phi),y:cy+R*Math.sin(phi),tx,ty,nx:-ty,ny:tx};
     }
+    const phi=Math.PI/2-q/R;
+    const cx=g.outerX-R,cy=g.mouth.y-R;
+    const tx=-Math.sin(phi),ty=Math.cos(phi);
+    return{x:cx+R*Math.cos(phi),y:cy+R*Math.sin(phi),tx,ty,nx:-ty,ny:tx};
   }
 
   const vertical=q-arc;
@@ -176,14 +171,10 @@ function cubicPose(p0,p1,p2,p3,u){
 function feederEntryPoint(side,col,u,targetIndex){
   const start=feederRowPose(side,0);
   const target=loopPose(Math.floor(targetIndex/ROTATION_COLS),state.rotationPhase);
-  const c1={x:start.x+start.tx*44,y:start.y+start.ty*44};
-  const c2={x:target.x-target.tx*56,y:target.y-target.ty*56};
+  const c1={x:start.x+start.tx*30,y:start.y+start.ty*30};
+  const c2={x:target.x-target.tx*34,y:target.y-target.ty*34};
   const p=cubicPose(
-    {x:start.x,y:start.y},
-    c1,
-    c2,
-    {x:target.x,y:target.y},
-    u
+    {x:start.x,y:start.y},c1,c2,{x:target.x,y:target.y},u
   );
   const off=(col-(FEEDER_COLS-1)/2)*FEED_LANE_SPACING;
   return{x:p.x+p.nx*off,y:p.y+p.ny*off};
@@ -380,9 +371,9 @@ function drawCrowdTrack(){
   ctx.save();ctx.lineCap='round';ctx.lineJoin='round';
 
   for(const stroke of [
-    {w:104,c:'#aebbc4'},
-    {w:96,c:'#f7fafc'},
-    {w:88,c:'#d6e0e6'}
+    {w:72,c:'#aebbc4'},
+    {w:66,c:'#f7fafc'},
+    {w:60,c:'#d6e0e6'}
   ]){
     ctx.beginPath();
     candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
@@ -395,13 +386,13 @@ function drawCrowdTrack(){
     const R=g.radius;
     const tangentX=side==='left'?g.outerX+R:g.outerX-R;
     const target=loopPose(side==='left'?LEFT_JOIN_ROW:RIGHT_JOIN_ROW,0);
-    const c1={x:g.mouth.x+(side==='left'?44:-44),y:g.mouth.y};
-    const c2={x:target.x-target.tx*56,y:target.y-target.ty*56};
+    const c1={x:g.mouth.x+(side==='left'?30:-30),y:g.mouth.y};
+    const c2={x:target.x-target.tx*34,y:target.y-target.ty*34};
 
     for(const stroke of [
-      {w:88,c:'#aebbc4'},
-      {w:80,c:'#f7fafc'},
-      {w:72,c:'#d6e0e6'}
+      {w:68,c:'#aebbc4'},
+      {w:62,c:'#f7fafc'},
+      {w:56,c:'#d6e0e6'}
     ]){
       ctx.beginPath();
       ctx.moveTo(g.outerX,-100);
@@ -415,9 +406,9 @@ function drawCrowdTrack(){
 
   const outlet=loopPose(OUTLET_ROW,0);
   for(const stroke of [
-    {w:104,c:'#aebbc4'},
-    {w:96,c:'#f7fafc'},
-    {w:88,c:'#778798'}
+    {w:72,c:'#aebbc4'},
+    {w:66,c:'#f7fafc'},
+    {w:60,c:'#778798'}
   ]){
     ctx.beginPath();
     ctx.moveTo(outlet.x,outlet.y);
@@ -462,19 +453,18 @@ function drawCandy(c,index){
   ctx.save();ctx.translate(p.x,p.y);ctx.beginPath();ctx.arc(1.5,2.3,5.3,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.18)';ctx.fill();ctx.beginPath();ctx.arc(0,0,5.2,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();
   ctx.beginPath();ctx.arc(-1.7,-1.8,1.6,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.45)';ctx.fill();ctx.restore();
 }
-function drawSweetAt(p,color,r=10.2){
+function drawSweetAt(p,color,r=SWEET_RADIUS){
   ctx.save();ctx.translate(p.x,p.y);
-  ctx.beginPath();ctx.arc(2.8,4.2,r+.2,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.17)';ctx.fill();
+  ctx.beginPath();ctx.arc(1.9,2.8,r+.15,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.17)';ctx.fill();
   ctx.beginPath();ctx.arc(0,0,r,0,Math.PI*2);ctx.fillStyle=COLORS[color];ctx.fill();
-  ctx.beginPath();ctx.arc(-3.2,-3.4,2.9,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.43)';ctx.fill();
+  ctx.beginPath();ctx.arc(-2.2,-2.3,2.0,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.43)';ctx.fill();
   ctx.restore();
 }
 function drawFeederRows(feed,side,dt){
   const rowCount=Math.floor(feed.length/4);
-  const visibleRows=Math.min(rowCount,VISIBLE_FEED_ROWS);
   const rowSpeed=ROTATION_SPEED_ROWS*conveyorSpeedMultiplier();
 
-  for(let r=visibleRows-1;r>=0;r--){
+  for(let r=rowCount-1;r>=0;r--){
     const row=feed.slice(r*4,r*4+4);
     if(row.length!==4)continue;
     const leader=row[0];
@@ -487,7 +477,7 @@ function drawFeederRows(feed,side,dt){
     // One shared visual-row position for all four sweets. No per-sweet feeder motion.
     for(let col=0;col<4;col++){
       const p=feederRowPos(side,leader.feedVisualRow,col);
-      drawSweetAt(p,row[col].color,10);
+      drawSweetAt(p,row[col].color,SWEET_RADIUS);
     }
   }
 }
@@ -514,7 +504,7 @@ function drawQueue(dt){
       const p=entryU==null
         ? candyPos(base+col)
         : feederEntryPoint(leader.entrySide,col,entryU,base+col);
-      drawSweetAt(p,row[col].color,10.4);
+      drawSweetAt(p,row[col].color,SWEET_RADIUS);
     }
   }
 }
@@ -616,8 +606,8 @@ function drawParticles(){
   for(const p of state.particles){
     const local=p.t-(p.delay||0);
     if(local<0){
-      ctx.beginPath();ctx.arc(p.sx,p.sy,9.6,0,Math.PI*2);ctx.fillStyle=COLORS[p.color];ctx.fill();
-      ctx.beginPath();ctx.arc(p.sx-3,p.sy-3,2.6,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.48)';ctx.fill();
+      ctx.beginPath();ctx.arc(p.sx,p.sy,SWEET_RADIUS,0,Math.PI*2);ctx.fillStyle=COLORS[p.color];ctx.fill();
+      ctx.beginPath();ctx.arc(p.sx-2.2,p.sy-2.2,2,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.48)';ctx.fill();
       continue;
     }
     const raw=clamp(local/p.duration,0,1),u=ease(raw),q=1-u;
@@ -626,8 +616,8 @@ function drawParticles(){
     const x=q*q*q*p.sx+3*q*q*u*c1x+3*q*u*u*c2x+u*u*u*p.tx;
     const y=q*q*q*p.sy+3*q*q*u*c1y+3*q*u*u*c2y+u*u*u*p.ty;
     ctx.globalAlpha=1-raw*.12;
-    ctx.beginPath();ctx.arc(x,y,9.6*(1-raw*.06),0,Math.PI*2);ctx.fillStyle=COLORS[p.color];ctx.fill();
-    ctx.beginPath();ctx.arc(x-3,y-3,2.6,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.48)';ctx.fill();
+    ctx.beginPath();ctx.arc(x,y,SWEET_RADIUS*(1-raw*.06),0,Math.PI*2);ctx.fillStyle=COLORS[p.color];ctx.fill();
+    ctx.beginPath();ctx.arc(x-2.2,y-2.2,2,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.48)';ctx.fill();
     ctx.globalAlpha=1;
   }
 }
