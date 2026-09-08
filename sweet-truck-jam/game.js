@@ -63,9 +63,9 @@ function roundedRect(x,y,w,h,r,fill,stroke,line=1){
 function text(s,x,y,size,fill='#fff',align='center',weight=900){ctx.fillStyle=fill;ctx.textAlign=align;ctx.textBaseline='middle';ctx.font=`${weight} ${size}px ui-rounded,system-ui,-apple-system`;ctx.fillText(s,x,y)}
 
 function makeCandyPath(){
-  // Centreline traced directly from the user's green annotation.
-  // Coordinates are the traced outline normalized into the game canvas.
-  const anchors=[
+  // Keep the green-line silhouette, but smooth it with repeated closed-curve
+  // corner cutting so curvature changes are gradual like the reference video.
+  let pts=[
     [315.0,203.7],
     [313.2,249.3],
     [251.7,295.9],
@@ -85,40 +85,35 @@ function makeCandyPath(){
     [302.2,185.8]
   ].map(([x,y])=>({x,y}));
 
-  const raw=[];
-  const steps=24;
-  const n=anchors.length;
-  for(let i=0;i<n;i++){
-    const p0=anchors[(i-1+n)%n];
-    const p1=anchors[i];
-    const p2=anchors[(i+1)%n];
-    const p3=anchors[(i+2)%n];
-
-    for(let j=0;j<steps;j++){
-      const t=j/steps,t2=t*t,t3=t2*t;
-      raw.push({
-        x:.5*((2*p1.x)+(-p0.x+p2.x)*t+(2*p0.x-5*p1.x+4*p2.x-p3.x)*t2+(-p0.x+3*p1.x-3*p2.x+p3.x)*t3),
-        y:.5*((2*p1.y)+(-p0.y+p2.y)*t+(2*p0.y-5*p1.y+4*p2.y-p3.y)*t2+(-p0.y+3*p1.y-3*p2.y+p3.y)*t3)
-      });
+  // Chaikin-style subdivision preserves the overall traced silhouette while
+  // removing the visible kinks and abrupt tangent changes.
+  const ratio=.20;
+  for(let round=0;round<4;round++){
+    const next=[];
+    for(let i=0;i<pts.length;i++){
+      const a=pts[i],b=pts[(i+1)%pts.length];
+      next.push({x:lerp(a.x,b.x,ratio),y:lerp(a.y,b.y,ratio)});
+      next.push({x:lerp(a.x,b.x,1-ratio),y:lerp(a.y,b.y,1-ratio)});
     }
+    pts=next;
   }
-  raw.push({...raw[0]});
 
-  // Resample by physical distance so all 36 rows travel at an even speed
-  // around the traced outline, regardless of local curvature.
+  // Uniform-distance resampling keeps the 36 logical rows moving at a constant
+  // physical speed around the smoothed outline.
+  const closed=[...pts,{...pts[0]}];
   const cumulative=[0];
-  for(let i=1;i<raw.length;i++){
-    cumulative.push(cumulative[i-1]+Math.hypot(raw[i].x-raw[i-1].x,raw[i].y-raw[i-1].y));
+  for(let i=1;i<closed.length;i++){
+    cumulative.push(cumulative[i-1]+Math.hypot(closed[i].x-closed[i-1].x,closed[i].y-closed[i-1].y));
   }
   const total=cumulative[cumulative.length-1];
   const dense=[];
-  const sampleCount=240;
+  const sampleCount=320;
   let cursor=1;
 
   for(let n=0;n<sampleCount;n++){
     const target=n/(sampleCount-1)*total;
     while(cursor<cumulative.length-1&&cumulative[cursor]<target)cursor++;
-    const a=raw[cursor-1],b=raw[cursor];
+    const a=closed[cursor-1],b=closed[cursor];
     const span=Math.max(.001,cumulative[cursor]-cumulative[cursor-1]);
     const u=(target-cumulative[cursor-1])/span;
     dense.push({x:lerp(a.x,b.x,u),y:lerp(a.y,b.y,u)});
