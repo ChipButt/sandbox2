@@ -27,8 +27,8 @@ const FEEDER_COLS=4;
 const ROTATION_SPEED_ROWS=4.0;
 const LOOP_ROWS=ROTATION_CAPACITY/ROTATION_COLS;
 if(LOOP_ROWS>36)throw new Error('Central rotation may not exceed 36 rows');
-const LEFT_JOIN_ROW=0;
-const RIGHT_JOIN_ROW=5;
+const LEFT_JOIN_ROW=29;
+const RIGHT_JOIN_ROW=11;
 const OUTLET_ROW=20;
 const OUTLET_SOURCE_ROW=(OUTLET_ROW-1+LOOP_ROWS)%LOOP_ROWS;
 const LOAD_MOUTH={x:210,y:344};
@@ -109,22 +109,20 @@ function candyPos(index,phase=state?.rotationPhase||0){
 }
 function feederGeometry(side){
   if(side==='left'){
-    const join=loopPose(LEFT_JOIN_ROW,0); // top-left, tangent right
+    const join=loopPose(LEFT_JOIN_ROW,0);
     return{
       join,
-      start:{x:62,y:110},
-      elbow:{x:62,y:125},
-      c1:{x:62,y:125},
-      c2:{x:118,y:125}
+      start:{x:62,y:join.y-48},
+      elbow:{x:62,y:join.y},
+      c2:{x:join.x-32,y:join.y}
     };
   }
-  const join=loopPose(RIGHT_JOIN_ROW,0); // top-right, reached from the right
+  const join=loopPose(RIGHT_JOIN_ROW,0);
   return{
     join,
-    start:{x:358,y:110},
-    elbow:{x:358,y:125},
-    c1:{x:358,y:125},
-    c2:{x:302,y:125}
+    start:{x:358,y:join.y-48},
+    elbow:{x:358,y:join.y},
+    c2:{x:join.x+32,y:join.y}
   };
 }
 function feederRowPos(side,rowVisual,col){
@@ -144,14 +142,17 @@ function cubicPose(p0,p1,p2,p3,u){
 function feederEntryPoint(side,col,u,targetIndex){
   const g=feederGeometry(side);
   const target=loopPose(Math.floor(targetIndex/ROTATION_COLS),state.rotationPhase);
+  const c2={
+    x:side==='left'?target.x-32:target.x+32,
+    y:target.y
+  };
 
-  // The whole row travels down the same vertical tube and rotates through one
-  // quarter-turn elbow together. The normal vector rotates with the corner,
-  // so all four sweets remain a rigid four-abreast row.
+  // The complete four-sweet row comes straight down, then rotates through
+  // one 90-degree side elbow into the central loop.
   const p=cubicPose(
     g.start,
     g.elbow,
-    g.c2,
+    c2,
     {x:target.x,y:target.y},
     u
   );
@@ -369,9 +370,9 @@ function drawCrowdTrack(){
     ]){
       ctx.beginPath();
       ctx.moveTo(g.start.x,-100);
-      ctx.lineTo(g.start.x,g.elbow.y);
+      ctx.lineTo(g.start.x,g.start.y);
       ctx.bezierCurveTo(
-        g.c1.x,g.c1.y,
+        g.elbow.x,g.elbow.y,
         g.c2.x,g.c2.y,
         g.join.x,g.join.y
       );
@@ -381,9 +382,9 @@ function drawCrowdTrack(){
 
   const outlet=loopPose(OUTLET_ROW,0);
   for(const stroke of [
-    {w:25,c:'#aebbc4'},
-    {w:21,c:'#f7fafc'},
-    {w:16,c:'#778798'}
+    {w:52,c:'#aebbc4'},
+    {w:46,c:'#f7fafc'},
+    {w:40,c:'#778798'}
   ]){
     ctx.beginPath();
     ctx.moveTo(outlet.x,outlet.y);
