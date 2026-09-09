@@ -424,47 +424,15 @@ function blockingTruckIds(t,trucks){
   return[...ids];
 }
 function removalOrder(trucks,r){
-  const n=trucks.length;
-  if(n===0)return[];
-  if(n>30)return null;
-
-  const fullMask=(1<<n)-1;
-  const dead=new Set();
-  let nodes=0;
-  const nodeLimit=900;
-
-  function members(mask){
-    const out=[];
-    for(let i=0;i<n;i++)if(mask&(1<<i))out.push(trucks[i]);
-    return out;
+  const rem=trucks.map(t=>({...t})),out=[];
+  while(rem.length){
+    const free=rem.filter(t=>canDriveOut(t,rem));
+    if(!free.length)return null;
+    const t=choice(r,free);
+    out.push(t.id);
+    rem.splice(rem.findIndex(x=>x.id===t.id),1);
   }
-  function solve(mask){
-    if(mask===0)return[];
-    if(dead.has(mask)||nodes++>nodeLimit)return null;
-
-    const rem=members(mask),free=[];
-    for(let i=0;i<n;i++){
-      if(!(mask&(1<<i)))continue;
-      if(canDriveOut(trucks[i],rem))free.push(i);
-    }
-    if(!free.length){dead.add(mask);return null}
-
-    // Vary equivalent solutions by seed, but backtrack if a choice later jams.
-    for(let i=free.length-1;i>0;i--){
-      const j=Math.floor(r()*(i+1));
-      [free[i],free[j]]=[free[j],free[i]];
-    }
-
-    for(const i of free){
-      const rest=solve(mask&~(1<<i));
-      if(rest)return[trucks[i].id,...rest];
-    }
-
-    dead.add(mask);
-    return null;
-  }
-
-  return solve(fullMask);
+  return out;
 }
 function difficultyProfile(n){
   if(n<=2)return{maxFree:8,garageChance:0,hiddenChance:0,shuffleMoves:1};
@@ -578,39 +546,24 @@ function validateGeneratedLevel(gen){
 }
 function buildRandomCluster(n,R,relaxed=false){
   const count=Math.min((relaxed?15:17)+Math.floor(n*.35),22),trucks=[];
-  const cx=JAM.x+JAM.w/2,cy=JAM.y+JAM.h/2;
-
   for(let i=0;i<count;i++){
     let placed=false;
     for(let k=0;k<450&&!placed;k++){
       const kind=R()<.18?2:R()<.55?1:0;
       const length=[48,59,72][kind],width=[25,27,29][kind];
-      const x=rint(R,JAM.x+34,JAM.x+JAM.w-34);
-      const y=rint(R,JAM.y+34,JAM.y+JAM.h-34);
-
-      // Head generally away from the cluster centre so the pile remains
-      // solvable. Harder levels introduce more sideways/inward deviations,
-      // creating blockers without turning the layout into artificial rows.
-      const unit=Math.PI/4;
-      const outward=Math.round(Math.atan2(y-cy,x-cx)/unit)*unit;
-      const roll=R();
-      let twist=0;
-      const straightChance=n<=2?.96:n<=7?.92:.88;
-      const sideChance=n<=2?.04:n<=7?.07:.10;
-      if(roll>straightChance){
-        const sign=R()<.5?-1:1;
-        twist=roll<straightChance+sideChance?sign:sign*2;
-      }
-      const angle=outward+twist*unit;
-
-      const t={id:`t${i}`,x,y,angle,length,width,capacity:[20,28,36][kind],kind,color:'red'};
+      const angle=choice(R,[0,Math.PI/4,Math.PI/2,3*Math.PI/4,Math.PI,5*Math.PI/4,3*Math.PI/2,7*Math.PI/4]);
+      const t={
+        id:`t${i}`,
+        x:rint(R,JAM.x+34,JAM.x+JAM.w-34),
+        y:rint(R,JAM.y+34,JAM.y+JAM.h-34),
+        angle,length,width,capacity:[20,28,36][kind],kind,color:'red'
+      };
       const poly=truckPoly(t);
       if(poly.some(p=>p.x<JAM.x+4||p.x>JAM.x+JAM.w-4||p.y<JAM.y+4||p.y>JAM.y+JAM.h-4))continue;
       if(trucks.some(o=>polyOverlap(poly,truckPoly(o))))continue;
       trucks.push(t);placed=true;
     }
   }
-
   if(trucks.length<count-2)return null;
   compactTruckLayout(trucks);
   return trucks;
@@ -624,21 +577,30 @@ function finishGeneratedCluster(trucks,order,R,n){
   applyHiddenTruckColours(gen,R,n);return validateGeneratedLevel(gen)?gen:null;
 }
 function generateLevel(n){
-  const profile=difficultyProfile(n);
-  for(let attempt=0;attempt<18;attempt++){
-    const R=rng(n*73471+attempt*977+19),trucks=buildRandomCluster(n,R,false);if(!trucks)continue;
-    const clear=initialClearCount(trucks);if(clear<2||clear>profile.maxFree)continue;
-    const order=removalOrder(trucks,R);if(!order)continue;
-    const gen=finishGeneratedCluster(trucks,order,R,n);if(gen)return gen;
+  for(let attempt=0;attempt<220;attempt++){
+    const R=rng(n*73471+attempt*977+19);
+    const trucks=buildRandomCluster(n,R,false);
+    if(!trucks)continue;
+    const clear=initialClearCount(trucks);
+    if(clear<2||clear>Math.max(7,trucks.length*.68))continue;
+    const order=removalOrder(trucks,R);
+    if(!order)continue;
+    const gen=finishGeneratedCluster(trucks,order,R,n);
+    if(gen)return gen;
   }
   return fallbackLevel(n);
 }
 function fallbackLevel(n){
-  for(let attempt=0;attempt<60;attempt++){
-    const R=rng(n*191+attempt*1297+401),trucks=buildRandomCluster(n,R,true);if(!trucks)continue;
-    const clear=initialClearCount(trucks);if(clear<2||clear>7)continue;
-    const order=removalOrder(trucks,R);if(!order)continue;
-    const gen=finishGeneratedCluster(trucks,order,R,n);if(gen)return gen;
+  for(let attempt=0;attempt<700;attempt++){
+    const R=rng(n*191+attempt*1297+401);
+    const trucks=buildRandomCluster(n,R,true);
+    if(!trucks)continue;
+    const clear=initialClearCount(trucks);
+    if(clear<2||clear>Math.max(8,trucks.length*.75))continue;
+    const order=removalOrder(trucks,R);
+    if(!order)continue;
+    const gen=finishGeneratedCluster(trucks,order,R,n);
+    if(gen)return gen;
   }
   throw new Error('Unable to generate clustered level');
 }
