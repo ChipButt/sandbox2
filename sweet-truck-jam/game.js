@@ -439,7 +439,8 @@ function allGeneratedTrucks(gen){
   return gen.garage?[...gen.trucks,...gen.garage.queue]:[...gen.trucks];
 }
 function maybeAddGarage(trucks,order,r,n,profile){
-  if(profile.garageChance<=0||r()>profile.garageChance)return null;
+  const forced=n>=6&&n%3===0;
+  if(!forced&&(profile.garageChance<=0||r()>profile.garageChance))return null;
   const free=trucks.filter(t=>canDriveOut(t,trucks));
   if(!free.length)return null;
 
@@ -565,13 +566,17 @@ function simulateParkingSequence(gen){
     const t=byId.get(id);
     if(!t)return{solvable:false,maxParked:99,forcedWrong};
 
+    // The real game cannot launch another truck if all four standard bays are
+    // occupied, even if that new truck would have matching sweets immediately.
+    resolve();
+    if(parked.length>=4)return{solvable:false,maxParked,forcedWrong};
+
     const hasNow=available.includes(t.color);
     if(!hasNow)forcedWrong++;
     parked.push({id:t.id,color:t.color,need:t.capacity/4});
     maxParked=Math.max(maxParked,parked.length);
 
     resolve();
-    if(parked.length>4)return{solvable:false,maxParked,forcedWrong};
   }
 
   resolve();
@@ -609,8 +614,10 @@ function applyHiddenTruckColours(gen,r,n,profile){
     blockingTruckIds(t,gen.trucks).length>=2
   );
 
+  const maxHidden=n<5?2:n<8?4:n<13?6:8;
   let hidden=0;
   for(const t of candidates){
+    if(hidden>=maxHidden)break;
     if(r()<profile.hiddenChance){
       t.hideColor=true;
       t.revealed=false;
