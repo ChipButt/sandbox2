@@ -20,25 +20,25 @@ const overlayPrimary=document.getElementById('overlayPrimary');
 const overlaySecondary=document.getElementById('overlaySecondary');
 
 let dpr=1,scale=1,ox=0,oy=0,last=0,level=1,state=null,toastTimer=0;
-const ROTATION_CAPACITY=80;
+const ROTATION_CAPACITY=48;
 const ROTATION_COLS=4;
 const FEEDER_COLS=4;
-const ROTATION_SPEED_ROWS=2.2;
+const ROTATION_SPEED_ROWS=.9;
 const LOOP_ROWS=ROTATION_CAPACITY/ROTATION_COLS;
-if(LOOP_ROWS>20)throw new Error('Central rotation may not exceed 20 rows');
+if(LOOP_ROWS>12)throw new Error('Central rotation may not exceed 12 rows');
 const LEFT_JOIN_ROW=0;
-const RIGHT_JOIN_ROW=10;
-const OUTLET_ROW=15;
+const RIGHT_JOIN_ROW=6;
+const OUTLET_ROW=9;
 const OUTLET_SOURCE_ROW=(OUTLET_ROW-1+LOOP_ROWS)%LOOP_ROWS;
 const LOAD_MOUTH={x:210,y:344};
 const SWEET_RADIUS=14;
-const CENTRAL_LANE_SPACING=26.4;
-const FEED_LANE_SPACING=26.0;
-const FEED_ROW_SPACING=29.0;
+const CENTRAL_LANE_SPACING=29.0;
+const FEED_LANE_SPACING=29.0;
+const FEED_ROW_SPACING=32.0;
 const FEED_CORNER_RADIUS=58;
-const LOOP_CENTER={x:220,y:215};
+const LOOP_CENTER={x:210,y:192};
 const LOOP_INNER_RADIUS=SWEET_RADIUS;
-const LOOP_ROW_RADIUS=LOOP_INNER_RADIUS+SWEET_RADIUS+((ROTATION_COLS-1)/2)*CENTRAL_LANE_SPACING;
+const LOOP_ROW_RADIUS=102;
 const LOOP_OUTER_RADIUS=LOOP_ROW_RADIUS+((ROTATION_COLS-1)/2)*CENTRAL_LANE_SPACING+SWEET_RADIUS;
 const LOOP_START_ANGLE=Math.PI;
 const pointer={x:0,y:0};
@@ -87,45 +87,23 @@ function candyPos(index,phase=state?.rotationPhase||0){
 }
 function feederGeometry(side){
   const join=loopPose(side==='left'?LEFT_JOIN_ROW:RIGHT_JOIN_ROW,0);
-  const outerX=side==='left'?6:414;
-  const radius=FEED_CORNER_RADIUS;
-  const edgeX=LOOP_CENTER.x+(side==='left'?-LOOP_OUTER_RADIUS:LOOP_OUTER_RADIUS);
-  const mouth={x:edgeX,y:LOOP_CENTER.y};
-  return{join,outerX,radius,mouth};
+  const mouth={
+    x:LOOP_CENTER.x+(side==='left'?-LOOP_OUTER_RADIUS:LOOP_OUTER_RADIUS),
+    y:LOOP_CENTER.y
+  };
+  return{join,mouth};
 }
 function feederRowPose(side,rowVisual){
   const g=feederGeometry(side);
   const d=Math.max(0,rowVisual*FEED_ROW_SPACING);
-  const R=g.radius;
-  const tangentX=side==='left'?g.outerX+R:g.outerX-R;
-  const horizontal=Math.max(0,side==='left'?g.mouth.x-tangentX:tangentX-g.mouth.x);
-  const arc=R*Math.PI/2;
-
-  if(d<=horizontal){
-    return{
-      x:side==='left'?g.mouth.x-d:g.mouth.x+d,
-      y:g.mouth.y,
-      tx:side==='left'?1:-1,ty:0,
-      nx:0,ny:side==='left'?1:-1
-    };
-  }
-
-  const q=d-horizontal;
-  if(q<=arc){
-    if(side==='left'){
-      const phi=Math.PI/2+q/R;
-      const cx=g.outerX+R,cy=g.mouth.y-R;
-      const tx=Math.sin(phi),ty=-Math.cos(phi);
-      return{x:cx+R*Math.cos(phi),y:cy+R*Math.sin(phi),tx,ty,nx:-ty,ny:tx};
-    }
-    const phi=Math.PI/2-q/R;
-    const cx=g.outerX-R,cy=g.mouth.y-R;
-    const tx=-Math.sin(phi),ty=Math.cos(phi);
-    return{x:cx+R*Math.cos(phi),y:cy+R*Math.sin(phi),tx,ty,nx:-ty,ny:tx};
-  }
-
-  const vertical=q-arc;
-  return{x:g.outerX,y:g.mouth.y-R-vertical,tx:0,ty:1,nx:-1,ny:0};
+  return{
+    x:side==='left'?g.mouth.x-d:g.mouth.x+d,
+    y:g.mouth.y,
+    tx:side==='left'?1:-1,
+    ty:0,
+    nx:0,
+    ny:1
+  };
 }
 function feederRowPos(side,rowVisual,col){
   const p=feederRowPose(side,rowVisual);
@@ -144,8 +122,8 @@ function cubicPose(p0,p1,p2,p3,u){
 function feederEntryPoint(side,col,u,targetIndex){
   const start=feederRowPose(side,0);
   const target=loopPose(Math.floor(targetIndex/ROTATION_COLS),state.rotationPhase);
-  const c1={x:start.x+start.tx*40,y:start.y+start.ty*40};
-  const c2={x:target.x-target.tx*42,y:target.y-target.ty*42};
+  const c1={x:start.x+start.tx*48,y:start.y+start.ty*48};
+  const c2={x:target.x-target.tx*48,y:target.y-target.ty*48};
   const p=cubicPose(
     {x:start.x,y:start.y},c1,c2,{x:target.x,y:target.y},u
   );
@@ -551,7 +529,7 @@ function processFeederJunctions(){
 function start(n){
   level=n;state=newState(n);
   if(!loopRowsAreValid(state.rotation)||!rowsAreValid(state.leftFeed)||!rowsAreValid(state.rightFeed))throw new Error('Level started with an invalid sweet row');
-  if(state.rotation.length!==80)throw new Error('Central loop must contain exactly 20 row slots');
+  if(state.rotation.length!==48)throw new Error('Central loop must contain exactly 12 row slots');
   overlay.classList.add('hidden');saveLevel();showToast('Tap a truck with a clear path');
 }
 function saveLevel(){try{localStorage.setItem('sweet-fever-level',String(level))}catch(_){}}
@@ -568,16 +546,12 @@ function drawCrowdTrack(){
   ctx.save();
   ctx.lineJoin='round';
 
-  // Draw feeder tubes first so the central loop masks the connector overlap.
-  // Use butt caps so the feeder endpoint itself cannot create a rounded bulb.
+  // Top-up tubes now enter only from the left and right edges of the screen.
+  // There is no visible vertical run or external elbow.
   ctx.lineCap='butt';
   for(const side of ['left','right']){
     const g=feederGeometry(side);
-    const R=g.radius;
-    const tangentX=side==='left'?g.outerX+R:g.outerX-R;
-    const target=loopPose(side==='left'?LEFT_JOIN_ROW:RIGHT_JOIN_ROW,0);
-    const c1={x:g.mouth.x+(side==='left'?40:-40),y:g.mouth.y};
-    const c2={x:target.x-target.tx*42,y:target.y-target.ty*42};
+    const startX=side==='left'?-120:W+120;
 
     for(const stroke of [
       {w:124,c:'#aebbc4'},
@@ -585,12 +559,11 @@ function drawCrowdTrack(){
       {w:112,c:'#d6e0e6'}
     ]){
       ctx.beginPath();
-      ctx.moveTo(g.outerX,-100);
-      ctx.lineTo(g.outerX,g.mouth.y-R);
-      ctx.quadraticCurveTo(g.outerX,g.mouth.y,tangentX,g.mouth.y);
+      ctx.moveTo(startX,g.mouth.y);
       ctx.lineTo(g.mouth.x,g.mouth.y);
-      ctx.bezierCurveTo(c1.x,c1.y,c2.x,c2.y,target.x,target.y);
-      ctx.strokeStyle=stroke.c;ctx.lineWidth=stroke.w;ctx.stroke();
+      ctx.strokeStyle=stroke.c;
+      ctx.lineWidth=stroke.w;
+      ctx.stroke();
     }
   }
 
