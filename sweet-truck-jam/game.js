@@ -38,7 +38,7 @@ const FEED_ROW_SPACING=32.0;
 const FEED_CORNER_RADIUS=58;
 const LOOP_CENTER={x:210,y:192};
 const LOOP_INNER_RADIUS=SWEET_RADIUS;
-const LOOP_ROW_RADIUS=102;
+const LOOP_ROW_RADIUS=72;
 const LOOP_OUTER_RADIUS=LOOP_ROW_RADIUS+((ROTATION_COLS-1)/2)*CENTRAL_LANE_SPACING+SWEET_RADIUS;
 const LOOP_START_ANGLE=Math.PI;
 const pointer={x:0,y:0};
@@ -74,8 +74,9 @@ function loopPose(row,phase=state?.rotationPhase||0){
   const x=LOOP_CENTER.x+LOOP_ROW_RADIUS*ca;
   const y=LOOP_CENTER.y+LOOP_ROW_RADIUS*sa;
 
-  // Perfect circular motion. The row normal points toward the centre so the
-  // four sweets fill the hoop radially around a one-sweet-diameter hole.
+  // Perfect circular motion. The row normal points toward the centre. With
+  // this radius the three outer lanes remain comfortably spaced while the
+  // innermost lane intentionally overlaps around the one-sweet centre hole.
   const tx=-sa,ty=ca;
   const nx=-ca,ny=-sa;
   return{x,y,tx,ty,nx,ny};
