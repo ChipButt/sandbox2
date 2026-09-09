@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#dfe8ef">
+<title>Central Loop Editor</title>
+<style>
+:root{font-family:ui-rounded,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#172033;background:#dfe8ef}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:#dfe8ef}
+body{padding:max(10px,env(safe-area-inset-top)) 10px max(16px,env(safe-area-inset-bottom))}
+.wrap{max-width:760px;margin:auto}
+h1{font-size:21px;margin:0 0 4px;text-align:center}
+.sub{font-size:12px;line-height:1.35;text-align:center;opacity:.74;margin:0 10px 10px}
+.panel{background:rgba(255,255,255,.74);border:1px solid rgba(71,88,108,.2);border-radius:18px;padding:9px;box-shadow:0 7px 24px rgba(49,67,85,.08)}
+.canvasWrap{position:relative;border-radius:14px;overflow:hidden;background:#edf3f7;border:1px solid #b8c5d0;touch-action:none}
+canvas{display:block;width:100%;height:auto;touch-action:none}
+.toolbar{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:9px}
+button{min-height:42px;border:0;border-radius:12px;background:#287bb9;color:white;font-weight:850;padding:7px 8px;box-shadow:inset 0 -2px 0 rgba(0,0,0,.12)}
+button.secondary{background:#657488}
+button.warn{background:#b54c4c}
+button.active{outline:3px solid #ffd84a;outline-offset:1px}
+.controls{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px}
+.control{background:rgba(255,255,255,.78);border-radius:12px;padding:8px}
+.control label{display:flex;justify-content:space-between;gap:10px;font-size:11px;font-weight:850;opacity:.76;margin-bottom:5px}
+input[type=range]{width:100%}
+.status{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:11px;font-weight:750;opacity:.72}
+textarea{width:100%;height:130px;margin-top:9px;border:1px solid #b8c5d0;border-radius:12px;padding:9px;background:#f9fbfd;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;resize:vertical}
+.help{font-size:12px;line-height:1.45;margin-top:9px;padding:0 4px}
+.legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;font-size:11px;font-weight:800}
+.dot{display:inline-block;width:11px;height:11px;border-radius:50%;vertical-align:-1px;margin-right:4px}
+@media(max-width:540px){.toolbar{grid-template-columns:repeat(2,1fr)}.controls{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Central Loop Editor</h1>
+  <p class="sub">The current game loop is already loaded. Drag the numbered corner points. The animated sweet row uses the same rounded conveyor logic as the game.</p>
+  <div class="panel">
+    <div class="canvasWrap"><canvas id="c" width="420" height="360"></canvas></div>
+
+    <div class="toolbar">
+      <button id="freeBtn" class="active">Free Drag</button>
+      <button id="snapBtn">Snap Drag</button>
+      <button id="undoBtn" class="secondary">Undo</button>
+      <button id="resetBtn" class="secondary">Reset Current</button>
+      <button id="copyBtn">Copy Shape Data</button>
+      <button id="finishBtn">Finish + Copy</button>
+    </div>
+
+    <div class="controls">
+      <div class="control">
+        <label><span>SELECTED CORNER RADIUS</span><b id="radiusValue">22 px</b></label>
+        <input id="radius" type="range" min="4" max="60" step="1" value="22">
+      </div>
+      <div class="control">
+        <label><span>ANIMATION SPEED</span><b id="speedValue">1.0×</b></label>
+        <input id="speed" type="range" min="0.25" max="2" step="0.05" value="1">
+      </div>
+    </div>
+
+    <div class="legend">
+      <span><span class="dot" style="background:#ffd43b"></span>selected point</span>
+      <span><span class="dot" style="background:#287bb9"></span>other points</span>
+      <span><span class="dot" style="background:#39b54a"></span>movement centreline</span>
+    </div>
+
+    <div class="status">
+      <span id="modeStatus">Mode: Free Drag</span>
+      <span id="selectedStatus">Selected: point 7</span>
+      <span>Bottom geometry is unchanged unless you drag it.</span>
+    </div>
+
+    <textarea id="out" readonly></textarea>
+    <div class="help">
+      Drag a numbered point to reshape the loop. <b>Snap Drag</b> locks the point to a 10 px grid; <b>Free Drag</b> follows your finger exactly. Tap any point to select it, then adjust that point's <b>corner radius</b> independently. Larger radius = a gentler conveyor turn. When it looks right, tap <b>Finish + Copy</b> and paste the copied JSON into this chat.
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const W=420,H=360;
+  const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
+  const freeBtn=document.getElementById('freeBtn'),snapBtn=document.getElementById('snapBtn');
+  const undoBtn=document.getElementById('undoBtn'),resetBtn=document.getElementById('resetBtn');
+  const copyBtn=document.getElementById('copyBtn'),finishBtn=document.getElementById('finishBtn');
+  const radius=document.getElementById('radius'),radiusValue=document.getElementById('radiusValue');
+  const speed=document.getElementById('speed'),speedValue=document.getElementById('speedValue');
+  const modeStatus=document.getElementById('modeStatus'),selectedStatus=document.getElementById('selectedStatus');
+  const out=document.getElementById('out');
+
+  const basePoints=[
+    [100,90],[100,260],[140,300],[300,300],[340,260],[340,180],[270,110],[270,80],[110,80]
+  ];
+  const baseRadii=[22,22,22,22,22,22,22,22,22];
+
+  let points=basePoints.map(([x,y])=>({x,y}));
+  let radii=[...baseRadii];
+  let selected=6;
+  let mode='free';
+  let dragging=false,dragIndex=-1;
+  let history=[];
+  let phase=0,lastTs=performance.now();
+
+  function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+  function lerp(a,b,t){return a+(b-a)*t}
+  function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+  function save(){history.push({points:points.map(p=>({...p})),radii:[...radii],selected});if(history.length>80)history.shift()}
+  function undo(){if(!history.length)return;const h=history.pop();points=h.points.map(p=>({...p}));radii=[...h.radii];selected=h.selected;syncUI();render()}
+  function reset(){save();points=basePoints.map(([x,y])=>({x,y}));radii=[...baseRadii];selected=6;syncUI();render()}
+  function evtPoint(e){const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height}}
+
+  function nearestHandle(p){
+    let best=-1,bestD=20;
+    for(let i=0;i<points.length;i++){const d=dist(p,points[i]);if(d<bestD){best=i;bestD=d}}
+    return best;
+  }
+
+  function setMode(m){
+    mode=m;
+    freeBtn.classList.toggle('active',m==='free');
+    snapBtn.classList.toggle('active',m==='snap');
+    modeStatus.textContent='Mode: '+(m==='free'?'Free Drag':'Snap Drag');
+  }
+
+  function buildPath(){
+    const n=points.length,corners=[];
+    function unit(a,b){const dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy)||1;return{x:dx/d,y:dy/d,d}}
+    for(let i=0;i<n;i++){
+      const prev=points[(i-1+n)%n],curr=points[i],next=points[(i+1)%n];
+      const inc=unit(prev,curr),outg=unit(curr,next);
+      const cut=Math.min(radii[i],inc.d*.32,outg.d*.32);
+      corners.push({
+        vertex:curr,
+        enter:{x:curr.x-inc.x*cut,y:curr.y-inc.y*cut},
+        exit:{x:curr.x+outg.x*cut,y:curr.y+outg.y*cut}
+      });
+    }
+
+    const raw=[];
+    function addLine(a,b){
+      const len=dist(a,b),steps=Math.max(2,Math.ceil(len/2.2));
+      for(let i=0;i<steps;i++){const t=i/steps;raw.push({x:lerp(a.x,b.x,t),y:lerp(a.y,b.y,t)})}
+    }
+    function addCorner(a,c,b){
+      const approx=dist(a,c)+dist(c,b),steps=Math.max(12,Math.ceil(approx/1.2));
+      for(let i=0;i<steps;i++){
+        const t=i/steps,q=1-t;
+        raw.push({x:q*q*a.x+2*q*t*c.x+t*t*b.x,y:q*q*a.y+2*q*t*c.y+t*t*b.y});
+      }
+    }
+    for(let i=0;i<n;i++){
+      const cur=corners[i],next=corners[(i+1)%n];
+      addCorner(cur.enter,cur.vertex,cur.exit);
+      addLine(cur.exit,next.enter);
+    }
+    raw.push({...raw[0]});
+
+    const cum=[0];
+    for(let i=1;i<raw.length;i++)cum.push(cum[i-1]+dist(raw[i-1],raw[i]));
+    const total=cum[cum.length-1],dense=[];let cursor=1;
+    for(let i=0;i<600;i++){
+      const target=i/599*total;
+      while(cursor<cum.length-1&&cum[cursor]<target)cursor++;
+      const a=raw[cursor-1],b=raw[cursor],span=Math.max(.001,cum[cursor]-cum[cursor-1]);
+      const u=(target-cum[cursor-1])/span;
+      dense.push({x:lerp(a.x,b.x,u),y:lerp(a.y,b.y,u)});
+    }
+    return dense;
+  }
+
+  function samplePath(path,u){
+    const f=((u%1)+1)%1*(path.length-1);
+    const i0=Math.floor(f),i1=(i0+1)%path.length,t=f-i0;
+    const p0=path[i0],p1=path[i1];
+    const im=(i0-3+path.length)%path.length,ip=(i1+3)%path.length;
+    const pa=path[im],pb=path[ip];
+    let tx=pb.x-pa.x,ty=pb.y-pa.y,l=Math.hypot(tx,ty)||1;tx/=l;ty/=l;
+    return{x:lerp(p0.x,p1.x,t),y:lerp(p0.y,p1.y,t),tx,ty,nx:-ty,ny:tx};
+  }
+
+  function drawGrid(){
+    ctx.fillStyle='#edf3f7';ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle='rgba(83,110,132,.12)';ctx.lineWidth=1;
+    for(let x=0;x<=W;x+=20){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke()}
+    for(let y=0;y<=H;y+=20){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}
+  }
+
+  function drawTrack(path){
+    ctx.save();ctx.lineJoin='round';ctx.lineCap='round';
+    for(const st of [{w:72,c:'#aebbc4'},{w:66,c:'#f7fafc'},{w:60,c:'#d6e0e6'}]){
+      ctx.beginPath();path.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();
+      ctx.strokeStyle=st.c;ctx.lineWidth=st.w;ctx.stroke();
+    }
+    ctx.beginPath();path.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();
+    ctx.strokeStyle='#39b54a';ctx.lineWidth=3;ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawAnimatedRows(path){
+    const colors=['#e74b4b','#4389e8','#f4c842','#8a56d6','#37b86b'];
+    for(let r=0;r<8;r++){
+      const p=samplePath(path,phase+r/8);
+      for(let c=0;c<4;c++){
+        const off=(c-1.5)*13.2;
+        const x=p.x+p.nx*off,y=p.y+p.ny*off;
+        ctx.beginPath();ctx.arc(x,y,7,0,Math.PI*2);ctx.fillStyle=colors[r%colors.length];ctx.fill();
+        ctx.beginPath();ctx.arc(x-2.1,y-2.2,1.8,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.55)';ctx.fill();
+      }
+    }
+  }
+
+  function drawHandles(){
+    for(let i=0;i<points.length;i++){
+      const p=points[i],sel=i===selected;
+      ctx.beginPath();ctx.arc(p.x,p.y,sel?10:8,0,Math.PI*2);
+      ctx.fillStyle=sel?'#ffd43b':'#287bb9';ctx.fill();
+      ctx.lineWidth=2.5;ctx.strokeStyle='#fff';ctx.stroke();
+      ctx.fillStyle=sel?'#172033':'#fff';ctx.font='800 10px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(String(i+1),p.x,p.y+.5);
+    }
+  }
+
+  function render(){
+    const path=buildPath();
+    drawGrid();drawTrack(path);drawAnimatedRows(path);drawHandles();
+    exportData();
+  }
+
+  function exportData(){
+    const payload={
+      canvas:{width:420,height:360},
+      closed:true,
+      points:points.map(p=>[+p.x.toFixed(1),+p.y.toFixed(1)]),
+      cornerRadii:radii.map(v=>+v.toFixed(1))
+    };
+    out.value=JSON.stringify(payload);
+    localStorage.setItem('sweet-loop-editor-v2',out.value);
+    return out.value;
+  }
+
+  function syncUI(){
+    radius.value=radii[selected];
+    radiusValue.textContent=Math.round(radii[selected])+' px';
+    selectedStatus.textContent='Selected: point '+(selected+1);
+    speedValue.textContent=(+speed.value).toFixed(2).replace(/0$/,'')+'×';
+  }
+
+  canvas.addEventListener('pointerdown',e=>{
+    e.preventDefault();const p=evtPoint(e),idx=nearestHandle(p);if(idx<0)return;
+    save();selected=idx;dragIndex=idx;dragging=true;try{canvas.setPointerCapture(e.pointerId)}catch(_){}
+    syncUI();render();
+  },{passive:false});
+
+  canvas.addEventListener('pointermove',e=>{
+    if(!dragging)return;e.preventDefault();let p=evtPoint(e);
+    if(mode==='snap'){p.x=Math.round(p.x/10)*10;p.y=Math.round(p.y/10)*10}
+    points[dragIndex]={x:clamp(p.x,12,W-12),y:clamp(p.y,12,H-12)};
+    render();
+  },{passive:false});
+
+  const end=e=>{if(!dragging)return;e.preventDefault();dragging=false;dragIndex=-1;render()};
+  canvas.addEventListener('pointerup',end,{passive:false});
+  canvas.addEventListener('pointercancel',end,{passive:false});
+
+  radius.addEventListener('input',()=>{radii[selected]=+radius.value;radiusValue.textContent=radius.value+' px';render()});
+  radius.addEventListener('pointerdown',save);
+  speed.addEventListener('input',()=>{syncUI()});
+  freeBtn.onclick=()=>setMode('free');snapBtn.onclick=()=>setMode('snap');undoBtn.onclick=undo;resetBtn.onclick=reset;
+
+  async function copy(){
+    const data=exportData();
+    try{await navigator.clipboard.writeText(data);copyBtn.textContent='Copied ✓';setTimeout(()=>copyBtn.textContent='Copy Shape Data',1200)}
+    catch(_){out.focus();out.select();document.execCommand('copy')}
+  }
+  copyBtn.onclick=copy;
+  finishBtn.onclick=async()=>{await copy();finishBtn.textContent='Copied — paste into ChatGPT';setTimeout(()=>finishBtn.textContent='Finish + Copy',1700)};
+
+  const saved=localStorage.getItem('sweet-loop-editor-v2');
+  if(saved){
+    try{
+      const v=JSON.parse(saved);
+      if(Array.isArray(v.points)&&v.points.length===9)points=v.points.map(([x,y])=>({x,y}));
+      if(Array.isArray(v.cornerRadii)&&v.cornerRadii.length===9)radii=v.cornerRadii.map(Number);
+    }catch(_){}
+  }
+
+  syncUI();setMode('free');render();
+
+  function tick(ts){
+    const dt=Math.min(.04,(ts-lastTs)/1000);lastTs=ts;
+    phase=(phase+dt*.11*(+speed.value))%1;
+    render();requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
