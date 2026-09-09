@@ -553,16 +553,42 @@ function validateGeneratedLevel(gen){
 }
 function buildRandomCluster(n,R,relaxed=false){
   const count=Math.min((relaxed?15:17)+Math.floor(n*.35),22),trucks=[];
+  const cx=JAM.x+JAM.w/2,cy=JAM.y+JAM.h/2;
+
   for(let i=0;i<count;i++){
     let placed=false;
     for(let k=0;k<450&&!placed;k++){
-      const kind=R()<.18?2:R()<.55?1:0,length=[48,59,72][kind],width=[25,27,29][kind],angle=choice(R,[0,Math.PI/4,Math.PI/2,3*Math.PI/4,Math.PI,5*Math.PI/4,3*Math.PI/2,7*Math.PI/4]);
-      const t={id:`t${i}`,x:rint(R,JAM.x+34,JAM.x+JAM.w-34),y:rint(R,JAM.y+34,JAM.y+JAM.h-34),angle,length,width,capacity:[20,28,36][kind],kind,color:'red'};
-      const poly=truckPoly(t);if(poly.some(p=>p.x<JAM.x+4||p.x>JAM.x+JAM.w-4||p.y<JAM.y+4||p.y>JAM.y+JAM.h-4))continue;
-      if(trucks.some(o=>polyOverlap(poly,truckPoly(o))))continue;trucks.push(t);placed=true;
+      const kind=R()<.18?2:R()<.55?1:0;
+      const length=[48,59,72][kind],width=[25,27,29][kind];
+      const x=rint(R,JAM.x+34,JAM.x+JAM.w-34);
+      const y=rint(R,JAM.y+34,JAM.y+JAM.h-34);
+
+      // Head generally away from the cluster centre so the pile remains
+      // solvable. Harder levels introduce more sideways/inward deviations,
+      // creating blockers without turning the layout into artificial rows.
+      const unit=Math.PI/4;
+      const outward=Math.round(Math.atan2(y-cy,x-cx)/unit)*unit;
+      const roll=R();
+      let twist=0;
+      const straightChance=n<=2?.78:n<=7?.58:.48;
+      const sideChance=n<=2?.18:n<=7?.28:.32;
+      if(roll>straightChance){
+        const sign=R()<.5?-1:1;
+        twist=roll<straightChance+sideChance?sign:sign*2;
+      }
+      const angle=outward+twist*unit;
+
+      const t={id:`t${i}`,x,y,angle,length,width,capacity:[20,28,36][kind],kind,color:'red'};
+      const poly=truckPoly(t);
+      if(poly.some(p=>p.x<JAM.x+4||p.x>JAM.x+JAM.w-4||p.y<JAM.y+4||p.y>JAM.y+JAM.h-4))continue;
+      if(trucks.some(o=>polyOverlap(poly,truckPoly(o))))continue;
+      trucks.push(t);placed=true;
     }
   }
-  if(trucks.length<count-2)return null;compactTruckLayout(trucks);return trucks;
+
+  if(trucks.length<count-2)return null;
+  compactTruckLayout(trucks);
+  return trucks;
 }
 function finishGeneratedCluster(trucks,order,R,n){
   for(const t of trucks)t._blockCount=blockingTruckIds(t,trucks).length;
