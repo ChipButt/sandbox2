@@ -20,16 +20,15 @@ const overlayPrimary=document.getElementById('overlayPrimary');
 const overlaySecondary=document.getElementById('overlaySecondary');
 
 let dpr=1,scale=1,ox=0,oy=0,last=0,level=1,state=null,toastTimer=0;
-let candyPath=[];
 const ROTATION_CAPACITY=80;
 const ROTATION_COLS=4;
 const FEEDER_COLS=4;
 const ROTATION_SPEED_ROWS=2.2;
 const LOOP_ROWS=ROTATION_CAPACITY/ROTATION_COLS;
 if(LOOP_ROWS>20)throw new Error('Central rotation may not exceed 20 rows');
-const LEFT_JOIN_ROW=2;
-const RIGHT_JOIN_ROW=12;
-const OUTLET_ROW=7;
+const LEFT_JOIN_ROW=0;
+const RIGHT_JOIN_ROW=10;
+const OUTLET_ROW=15;
 const OUTLET_SOURCE_ROW=(OUTLET_ROW-1+LOOP_ROWS)%LOOP_ROWS;
 const LOAD_MOUTH={x:210,y:344};
 const SWEET_RADIUS=14;
@@ -37,8 +36,11 @@ const CENTRAL_LANE_SPACING=26.4;
 const FEED_LANE_SPACING=26.0;
 const FEED_ROW_SPACING=29.0;
 const FEED_CORNER_RADIUS=58;
-const CENTRAL_TRACK_INSET=54;
-const CENTRAL_ROW_INSET=CENTRAL_TRACK_INSET/2;
+const LOOP_CENTER={x:220,y:215};
+const LOOP_INNER_RADIUS=SWEET_RADIUS;
+const LOOP_ROW_RADIUS=LOOP_INNER_RADIUS+SWEET_RADIUS+((ROTATION_COLS-1)/2)*CENTRAL_LANE_SPACING;
+const LOOP_OUTER_RADIUS=LOOP_ROW_RADIUS+((ROTATION_COLS-1)/2)*CENTRAL_LANE_SPACING+SWEET_RADIUS;
+const LOOP_START_ANGLE=Math.PI;
 const pointer={x:0,y:0};
 
 function resize(){
@@ -64,155 +66,19 @@ function roundedRect(x,y,w,h,r,fill,stroke,line=1){
 }
 function text(s,x,y,size,fill='#fff',align='center',weight=900){ctx.fillStyle=fill;ctx.textAlign=align;ctx.textBaseline='middle';ctx.font=`${weight} ${size}px ui-rounded,system-ui,-apple-system`;ctx.fillText(s,x,y)}
 
-function makeCandyPath(){
-  // User-authored loop, with conveyor-style rounded motion through each
-  // vertex. The supplied vertices still define the layout; only a short
-  // tangent section around each corner is replaced by a smooth turn.
-  const vertices=[
-    {x:128.3,y:158.9},
-    {x:130,y:280},
-    {x:180,y:320},
-    {x:280,y:320},
-    {x:310,y:300},
-    {x:310,y:190},
-    {x:260,y:160},
-    {x:220,y:120},
-    {x:160,y:110}
-  ];
-
-  const cornerCut=22;
-  const n=vertices.length;
-  const corners=[];
-
-  function unit(a,b){
-    const dx=b.x-a.x,dy=b.y-a.y;
-    const d=Math.hypot(dx,dy)||1;
-    return{x:dx/d,y:dy/d,d};
-  }
-
-  for(let i=0;i<n;i++){
-    const prev=vertices[(i-1+n)%n];
-    const curr=vertices[i];
-    const next=vertices[(i+1)%n];
-
-    const incoming=unit(prev,curr);
-    const outgoing=unit(curr,next);
-
-    const cut=Math.min(
-      cornerCut,
-      incoming.d*.32,
-      outgoing.d*.32
-    );
-
-    corners.push({
-      vertex:curr,
-      enter:{
-        x:curr.x-incoming.x*cut,
-        y:curr.y-incoming.y*cut
-      },
-      exit:{
-        x:curr.x+outgoing.x*cut,
-        y:curr.y+outgoing.y*cut
-      }
-    });
-  }
-
-  const raw=[];
-
-  function addLine(a,b){
-    const len=Math.hypot(b.x-a.x,b.y-a.y);
-    const steps=Math.max(2,Math.ceil(len/2.5));
-    for(let i=0;i<steps;i++){
-      const t=i/steps;
-      raw.push({x:lerp(a.x,b.x,t),y:lerp(a.y,b.y,t)});
-    }
-  }
-
-  function addCorner(a,c,b){
-    const approx=Math.hypot(c.x-a.x,c.y-a.y)+Math.hypot(b.x-c.x,b.y-c.y);
-    const steps=Math.max(10,Math.ceil(approx/1.5));
-    for(let i=0;i<steps;i++){
-      const t=i/steps,q=1-t;
-      raw.push({
-        x:q*q*a.x+2*q*t*c.x+t*t*b.x,
-        y:q*q*a.y+2*q*t*c.y+t*t*b.y
-      });
-    }
-  }
-
-  for(let i=0;i<n;i++){
-    const current=corners[i];
-    const next=corners[(i+1)%n];
-
-    addCorner(current.enter,current.vertex,current.exit);
-    addLine(current.exit,next.enter);
-  }
-  raw.push({...raw[0]});
-
-  // Uniform arc-length resampling makes the belt speed physically constant
-  // through both straights and bends.
-  const cumulative=[0];
-  for(let i=1;i<raw.length;i++){
-    cumulative.push(cumulative[i-1]+Math.hypot(raw[i].x-raw[i-1].x,raw[i].y-raw[i-1].y));
-  }
-
-  const total=cumulative[cumulative.length-1];
-  const dense=[];
-  const sampleCount=540;
-  let cursor=1;
-
-  for(let i=0;i<sampleCount;i++){
-    const target=i/(sampleCount-1)*total;
-    while(cursor<cumulative.length-1&&cumulative[cursor]<target)cursor++;
-    const a=raw[cursor-1],b=raw[cursor];
-    const span=Math.max(.001,cumulative[cursor]-cumulative[cursor-1]);
-    const u=(target-cumulative[cursor-1])/span;
-    dense.push({x:lerp(a.x,b.x,u),y:lerp(a.y,b.y,u)});
-  }
-
-  return dense;
-}
-candyPath=makeCandyPath();
-const LOOP_CENTER=candyPath.reduce((a,p)=>({x:a.x+p.x/candyPath.length,y:a.y+p.y/candyPath.length}),{x:0,y:0});
-
-function pathPoseAtExact(exact){
-  const i0=Math.floor(exact),i1=(i0+1)%candyPath.length,t=exact-i0;
-  const p0=candyPath[i0]||candyPath[0],p1=candyPath[i1]||candyPath[0];
-  const x=lerp(p0.x,p1.x,t),y=lerp(p0.y,p1.y,t);
-
-  const im1=(i0-2+candyPath.length)%candyPath.length;
-  const ip2=(i1+2)%candyPath.length;
-  const pa=candyPath[im1],pb=candyPath[ip2];
-  let tx=pb.x-pa.x,ty=pb.y-pa.y;
-  const len=Math.hypot(tx,ty)||1;tx/=len;ty/=len;
-
-  let nx=-ty,ny=tx;
-  const toCenterX=LOOP_CENTER.x-x,toCenterY=LOOP_CENTER.y-y;
-  if(nx*toCenterX+ny*toCenterY<0){nx=-nx;ny=-ny}
-
-  return{x,y,tx,ty,nx,ny};
-}
-function inwardOffsetPath(distance){
-  return candyPath.map((_,i)=>{
-    const p=pathPoseAtExact(i);
-    return{x:p.x+p.nx*distance,y:p.y+p.ny*distance};
-  });
-}
-const innerTrackPath=inwardOffsetPath(CENTRAL_TRACK_INSET);
-
 function loopPose(row,phase=state?.rotationPhase||0){
   const rowProgress=((row+phase)%LOOP_ROWS+LOOP_ROWS)%LOOP_ROWS;
-  const exact=(rowProgress/LOOP_ROWS)*(candyPath.length-1);
-  const p=pathPoseAtExact(exact);
+  const angle=LOOP_START_ANGLE+(rowProgress/LOOP_ROWS)*Math.PI*2;
+  const ca=Math.cos(angle),sa=Math.sin(angle);
 
-  // The row centreline moves halfway into the widened inner section. This
-  // keeps the loop's outside silhouette almost unchanged while giving the
-  // doubled sweets enough width toward the centre of the loop.
-  return{
-    x:p.x+p.nx*CENTRAL_ROW_INSET,
-    y:p.y+p.ny*CENTRAL_ROW_INSET,
-    tx:p.tx,ty:p.ty,nx:p.nx,ny:p.ny
-  };
+  const x=LOOP_CENTER.x+LOOP_ROW_RADIUS*ca;
+  const y=LOOP_CENTER.y+LOOP_ROW_RADIUS*sa;
+
+  // Perfect circular motion. The row normal points toward the centre so the
+  // four sweets fill the hoop radially around a one-sweet-diameter hole.
+  const tx=-sa,ty=ca;
+  const nx=-ca,ny=-sa;
+  return{x,y,tx,ty,nx,ny};
 }
 function candyPos(index,phase=state?.rotationPhase||0){
   const row=Math.floor(index/ROTATION_COLS),col=index%ROTATION_COLS,p=loopPose(row,phase);
@@ -223,7 +89,8 @@ function feederGeometry(side){
   const join=loopPose(side==='left'?LEFT_JOIN_ROW:RIGHT_JOIN_ROW,0);
   const outerX=side==='left'?6:414;
   const radius=FEED_CORNER_RADIUS;
-  const mouth={x:side==='left'?join.x-58:join.x+58,y:join.y};
+  const edgeX=LOOP_CENTER.x+(side==='left'?-LOOP_OUTER_RADIUS:LOOP_OUTER_RADIUS);
+  const mouth={x:edgeX,y:LOOP_CENTER.y};
   return{join,outerX,radius,mouth};
 }
 function feederRowPose(side,rowVisual){
@@ -727,22 +594,27 @@ function drawCrowdTrack(){
     }
   }
 
-  // Widen the central loop inward only. The original path preserves the
-  // outside silhouette; the second path extends the same layered track toward
-  // the centre. Their union creates enough room for four 28 px sweets.
-  ctx.lineCap='round';
-  for(const stroke of [
-    {w:72,c:'#aebbc4'},
-    {w:66,c:'#f7fafc'},
-    {w:60,c:'#d6e0e6'}
-  ]){
-    for(const path of [candyPath,innerTrackPath]){
-      ctx.beginPath();
-      path.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
-      ctx.closePath();
-      ctx.strokeStyle=stroke.c;ctx.lineWidth=stroke.w;ctx.stroke();
-    }
+  // True circular hoop. The clear centre is exactly one sweet diameter:
+  // inner radius = SWEET_RADIUS = 14 px, so the hole is 28 px across.
+  function fillHoop(outerR,innerR,fill){
+    ctx.beginPath();
+    ctx.arc(LOOP_CENTER.x,LOOP_CENTER.y,outerR,0,Math.PI*2);
+    ctx.arc(LOOP_CENTER.x,LOOP_CENTER.y,innerR,0,Math.PI*2,true);
+    ctx.fillStyle=fill;
+    ctx.fill('evenodd');
   }
+
+  fillHoop(LOOP_OUTER_RADIUS+6,LOOP_INNER_RADIUS,'#aebbc4');
+  fillHoop(LOOP_OUTER_RADIUS+3,LOOP_INNER_RADIUS,'#f7fafc');
+  fillHoop(LOOP_OUTER_RADIUS,LOOP_INNER_RADIUS,'#d6e0e6');
+
+  // Inner rim sits outside the clear radius, so it does not reduce the
+  // one-sweet-sized opening.
+  ctx.beginPath();
+  ctx.arc(LOOP_CENTER.x,LOOP_CENTER.y,LOOP_INNER_RADIUS+1.5,0,Math.PI*2);
+  ctx.strokeStyle='#aebbc4';
+  ctx.lineWidth=3;
+  ctx.stroke();
 
   const outlet=loopPose(OUTLET_ROW,0);
   for(const stroke of [
