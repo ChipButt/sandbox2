@@ -431,7 +431,7 @@ function removalOrder(trucks,r){
   const fullMask=(1<<n)-1;
   const dead=new Set();
   let nodes=0;
-  const nodeLimit=9000;
+  const nodeLimit=2600;
 
   function members(mask){
     const out=[];
@@ -469,9 +469,9 @@ function removalOrder(trucks,r){
 function difficultyProfile(n){
   if(n<=2)return{maxFree:5,garageChance:0,hiddenChance:0,shuffleMoves:1};
   if(n<=4)return{maxFree:5,garageChance:.22,hiddenChance:.25,shuffleMoves:2};
-  if(n<=7)return{maxFree:5,garageChance:.55,hiddenChance:.48,shuffleMoves:3};
-  if(n<=12)return{maxFree:5,garageChance:.68,hiddenChance:.58,shuffleMoves:4};
-  return{maxFree:5,garageChance:.76,hiddenChance:.68,shuffleMoves:5};
+  if(n<=7)return{maxFree:6,garageChance:.55,hiddenChance:.48,shuffleMoves:3};
+  if(n<=12)return{maxFree:6,garageChance:.68,hiddenChance:.58,shuffleMoves:4};
+  return{maxFree:6,garageChance:.76,hiddenChance:.68,shuffleMoves:5};
 }
 function allGeneratedTrucks(gen){return gen.garage?[...gen.trucks,...gen.garage.queue]:[...gen.trucks]}
 function addUndergroundGarage(gen,r,n){
@@ -595,8 +595,8 @@ function buildRandomCluster(n,R,relaxed=false){
       const outward=Math.round(Math.atan2(y-cy,x-cx)/unit)*unit;
       const roll=R();
       let twist=0;
-      const straightChance=n<=2?.78:n<=7?.58:.48;
-      const sideChance=n<=2?.18:n<=7?.28:.32;
+      const straightChance=n<=2?.88:n<=7?.78:.72;
+      const sideChance=n<=2?.10:n<=7?.18:.20;
       if(roll>straightChance){
         const sign=R()<.5?-1:1;
         twist=roll<straightChance+sideChance?sign:sign*2;
@@ -1076,7 +1076,7 @@ function drawParticles(){
     const local=p.t-(p.delay||0);
     if(local<0){
       ctx.beginPath();ctx.arc(p.sx,p.sy,SWEET_RADIUS,0,Math.PI*2);ctx.fillStyle=COLORS[p.color];ctx.fill();
-      ctx.beginPath();ctx.arc(p.sx-2.2,p.sy-2.2,2,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.48)';ctx.fill();
+      ctx.beginPath();ctx.arc(p.sx-SWEET_RADIUS*.31,p.sy-SWEET_RADIUS*.31,SWEET_RADIUS*.28,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.48)';ctx.fill();
       continue;
     }
     const raw=clamp(local/p.duration,0,1),u=ease(raw),q=1-u;
@@ -1086,7 +1086,7 @@ function drawParticles(){
     const y=q*q*q*p.sy+3*q*q*u*c1y+3*q*u*u*c2y+u*u*u*p.ty;
     ctx.globalAlpha=1-raw*.12;
     ctx.beginPath();ctx.arc(x,y,SWEET_RADIUS*(1-raw*.06),0,Math.PI*2);ctx.fillStyle=COLORS[p.color];ctx.fill();
-    ctx.beginPath();ctx.arc(x-2.2,y-2.2,2,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.48)';ctx.fill();
+    ctx.beginPath();ctx.arc(x-SWEET_RADIUS*.31,y-SWEET_RADIUS*.31,SWEET_RADIUS*.28,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.48)';ctx.fill();
     ctx.globalAlpha=1;
   }
 }
