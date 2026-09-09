@@ -634,15 +634,76 @@ function drawBoosters(){
 }
 
 function drawCandy(c,index){
-  const p=candyPos(c.visualIndex);const col=COLORS[c.color];
-  ctx.save();ctx.translate(p.x,p.y);ctx.beginPath();ctx.arc(1.5,2.3,5.3,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.18)';ctx.fill();ctx.beginPath();ctx.arc(0,0,5.2,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();
-  ctx.beginPath();ctx.arc(-1.7,-1.8,1.6,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.45)';ctx.fill();ctx.restore();
+  const p=candyPos(c.visualIndex);
+  drawSweetAt(p,c.color,SWEET_RADIUS);
 }
 function drawSweetAt(p,color,r=SWEET_RADIUS){
-  ctx.save();ctx.translate(p.x,p.y);
-  ctx.beginPath();ctx.arc(r*.27,r*.40,r+.3,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.17)';ctx.fill();
-  ctx.beginPath();ctx.arc(0,0,r,0,Math.PI*2);ctx.fillStyle=COLORS[color];ctx.fill();
-  ctx.beginPath();ctx.arc(-r*.31,-r*.33,r*.28,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.43)';ctx.fill();
+  const base=COLORS[color]||'#999';
+
+  ctx.save();
+  ctx.translate(p.x,p.y);
+
+  // Soft contact shadow gives the sphere some separation from the conveyor.
+  ctx.beginPath();
+  ctx.ellipse(r*.16,r*.58,r*.86,r*.38,0,0,Math.PI*2);
+  ctx.fillStyle='rgba(0,0,0,.20)';
+  ctx.fill();
+
+  // Main 3D sphere. The bright radial origin is offset to the upper-left,
+  // falling through the base colour into a darker lower-right edge.
+  const sphere=ctx.createRadialGradient(
+    -r*.38,-r*.42,r*.05,
+    r*.10,r*.12,r*1.16
+  );
+  sphere.addColorStop(0,'rgba(255,255,255,.98)');
+  sphere.addColorStop(.12,shade(base,.34));
+  sphere.addColorStop(.38,shade(base,.12));
+  sphere.addColorStop(.63,base);
+  sphere.addColorStop(.84,shade(base,-.17));
+  sphere.addColorStop(1,shade(base,-.34));
+
+  ctx.beginPath();
+  ctx.arc(0,0,r,0,Math.PI*2);
+  ctx.fillStyle=sphere;
+  ctx.fill();
+
+  // Lower hemisphere shading strengthens the spherical volume.
+  const lower=ctx.createLinearGradient(0,-r*.15,0,r);
+  lower.addColorStop(0,'rgba(0,0,0,0)');
+  lower.addColorStop(.58,'rgba(0,0,0,.02)');
+  lower.addColorStop(1,'rgba(0,0,0,.20)');
+  ctx.beginPath();
+  ctx.arc(0,0,r*.96,0,Math.PI*2);
+  ctx.fillStyle=lower;
+  ctx.fill();
+
+  // Broad glossy reflection.
+  const gloss=ctx.createRadialGradient(
+    -r*.34,-r*.38,0,
+    -r*.28,-r*.30,r*.54
+  );
+  gloss.addColorStop(0,'rgba(255,255,255,.92)');
+  gloss.addColorStop(.30,'rgba(255,255,255,.55)');
+  gloss.addColorStop(.72,'rgba(255,255,255,.12)');
+  gloss.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.beginPath();
+  ctx.arc(-r*.20,-r*.24,r*.50,0,Math.PI*2);
+  ctx.fillStyle=gloss;
+  ctx.fill();
+
+  // Small hard specular highlight.
+  ctx.beginPath();
+  ctx.arc(-r*.42,-r*.46,r*.105,0,Math.PI*2);
+  ctx.fillStyle='rgba(255,255,255,.96)';
+  ctx.fill();
+
+  // Fine dark rim at the lower edge to stop pale colours looking flat.
+  ctx.beginPath();
+  ctx.arc(0,0,r-.45,.10*Math.PI,.90*Math.PI);
+  ctx.strokeStyle='rgba(0,0,0,.15)';
+  ctx.lineWidth=Math.max(1,r*.08);
+  ctx.stroke();
+
   ctx.restore();
 }
 function drawFeederRows(feed,side,dt){
@@ -881,19 +942,20 @@ function motionPose(m){
 function drawParticles(){
   for(const p of state.particles){
     const local=p.t-(p.delay||0);
+
     if(local<0){
-      ctx.beginPath();ctx.arc(p.sx,p.sy,SWEET_RADIUS,0,Math.PI*2);ctx.fillStyle=COLORS[p.color];ctx.fill();
-      ctx.beginPath();ctx.arc(p.sx-SWEET_RADIUS*.31,p.sy-SWEET_RADIUS*.31,SWEET_RADIUS*.28,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.48)';ctx.fill();
+      drawSweetAt({x:p.sx,y:p.sy},p.color,SWEET_RADIUS);
       continue;
     }
+
     const raw=clamp(local/p.duration,0,1),u=ease(raw),q=1-u;
     const c1x=p.c1x??p.cx??p.sx,c1y=p.c1y??p.cy??p.sy;
     const c2x=p.c2x??p.cx??p.tx,c2y=p.c2y??p.cy??p.ty;
     const x=q*q*q*p.sx+3*q*q*u*c1x+3*q*u*u*c2x+u*u*u*p.tx;
     const y=q*q*q*p.sy+3*q*q*u*c1y+3*q*u*u*c2y+u*u*u*p.ty;
+
     ctx.globalAlpha=1-raw*.12;
-    ctx.beginPath();ctx.arc(x,y,SWEET_RADIUS*(1-raw*.06),0,Math.PI*2);ctx.fillStyle=COLORS[p.color];ctx.fill();
-    ctx.beginPath();ctx.arc(x-SWEET_RADIUS*.31,y-SWEET_RADIUS*.31,SWEET_RADIUS*.28,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.48)';ctx.fill();
+    drawSweetAt({x,y},p.color,SWEET_RADIUS*(1-raw*.06));
     ctx.globalAlpha=1;
   }
 }
