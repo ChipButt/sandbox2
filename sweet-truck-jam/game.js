@@ -397,92 +397,398 @@ function compactTruckLayout(trucks){
 }
 
 function initialClearCount(trucks){return trucks.filter(t=>canDriveOut(t,trucks)).length}
-function removalOrder(trucks,r){const rem=trucks.map(t=>({...t})),out=[];while(rem.length){const free=rem.filter(t=>canDriveOut(t,rem));if(!free.length)return null;const t=choice(r,free);out.push(t.id);rem.splice(rem.findIndex(x=>x.id===t.id),1)}return out}
+function blockingTruckIds(t,trucks){
+  const ids=new Set(),dx=Math.cos(t.angle),dy=Math.sin(t.angle);
+  const others=trucks.filter(o=>o.id!==t.id);
+  for(let d=5;d<540;d+=5){
+    const x=t.x+dx*d,y=t.y+dy*d,p=truckPoly(t,x,y);
+    for(const o of others)if(polyOverlap(p,truckPoly(o)))ids.add(o.id);
+    if(!insideJam(t,x,y))break;
+  }
+  return[...ids];
+}
+function removalOrder(trucks,r){
+  const rem=trucks.map(t=>({...t})),out=[];
+  while(rem.length){
+    const free=rem.filter(t=>canDriveOut(t,rem));
+    if(!free.length)return null;
 
+    // Prefer a move that exposes only a small number of new choices. This
+    // creates longer blocker chains instead of instantly opening the yard.
+    const scored=free.map(t=>{
+      const after=rem.filter(x=>x.id!==t.id);
+      const beforeFree=new Set(free.map(x=>x.id));
+      const newly=after.filter(x=>!beforeFree.has(x.id)&&canDriveOut(x,after)).length;
+      return{t,score:Math.abs(newly-1)+r()*.35};
+    }).sort((x,y)=>x.score-y.score);
+
+    const t=scored[Math.min(scored.length-1,Math.floor(r()*Math.min(2,scored.length)))].t;
+    out.push(t.id);
+    rem.splice(rem.findIndex(x=>x.id===t.id),1);
+  }
+  return out;
+}
+function difficultyProfile(n){
+  if(n<=2)return{minFree:3,maxFree:5,minMulti:0,garageChance:0,hiddenChance:0,target:4};
+  if(n<=4)return{minFree:2,maxFree:4,minMulti:.10,garageChance:.22,hiddenChance:.28,target:8};
+  if(n<=7)return{minFree:2,maxFree:3,minMulti:.20,garageChance:.55,hiddenChance:.52,target:13};
+  if(n<=12)return{minFree:2,maxFree:3,minMulti:.28,garageChance:.70,hiddenChance:.62,target:17};
+  return{minFree:2,maxFree:2,minMulti:.34,garageChance:.78,hiddenChance:.72,target:21};
+}
+function allGeneratedTrucks(gen){
+  return gen.garage?[...gen.trucks,...gen.garage.queue]:[...gen.trucks];
+}
+function maybeAddGarage(trucks,order,r,n,profile){
+  if(profile.garageChance<=0||r()>profile.garageChance)return null;
+  const free=trucks.filter(t=>canDriveOut(t,trucks));
+  if(!free.length)return null;
+
+  // The surface truck must be a genuinely selectable truck. Every later
+  // underground truck uses the same physical footprint/direction, so once the
+  // current one has escaped the next one is guaranteed to fit that space.
+  const early=free.filter(t=>order.indexOf(t.id)>=0&&order.indexOf(t.id)<Math.min(6,order.length));
+  const host=choice(r,early.length?early:free);
+  const extra=n<7?2:n<12?rint(r,2,3):rint(r,3,4);
+  const queue=[];
+
+  for(let i=0;i<extra;i++){
+    queue.push({
+      id:`g${i}_${host.id}`,
+      x:host.x,y:host.y,angle:host.angle,
+      kind:host.kind,length:host.length,width:host.width,capacity:host.capacity,
+      color:'red',garageTruck:true,hideColor:false
+    });
+  }
+
+  const pos=order.indexOf(host.id);
+  if(pos<0)return null;
+  order.splice(pos+1,0,...queue.map(t=>t.id));
+
+  host.garageTruck=true;
+  host.hideColor=false;
+  return{
+    x:host.x,y:host.y,angle:host.angle,
+    length:host.length,width:host.width,
+    currentId:host.id,
+    queue
+  };
+}
+function assignChallengeColors(gen,r,n){
+  const physical=gen.trucks;
+  const all=allGeneratedTrucks(gen);
+  const palette=COLOR_NAMES.slice(0,Math.min(5+Math.floor(n/4),8));
+  const freeIds=new Set(physical.filter(t=>canDriveOut(t,physical)).map(t=>t.id));
+  const freePalette=palette.slice(0,Math.max(3,palette.length-2));
+
+  for(const t of all){
+    const source=freeIds.has(t.id)?freePalette:palette;
+    t.color=choice(r,source);
+  }
+
+  // Reserve one or two colours for trucks which are not initially available.
+  // This makes the visible sweet colours and the immediately selectable
+  // trucks deliberately diverge.
+  if(palette.length>=5){
+    const multi=physical
+      .filter(t=>!freeIds.has(t.id)&&blockingTruckIds(t,physical).length>=2)
+      .sort((x,y)=>blockingTruckIds(y,physical).length-blockingTruckIds(x,physical).length);
+    const reserved=palette.slice(-Math.min(2,palette.length-3));
+    for(let i=0;i<Math.min(reserved.length,multi.length);i++)multi[i].color=reserved[i];
+  }
+
+  // Garage colours are deliberately unconstrained once they are underground;
+  // the player sees none of them until each truck surfaces.
+  if(gen.garage){
+    for(const t of gen.garage.queue)t.color=choice(r,palette);
+  }
+}
+function buildIndependentSweetRows(gen,r){
+  const byId=new Map(allGeneratedTrucks(gen).map(t=>[t.id,t]));
+  const ranked=[];
+
+  // Reverse-bias the sweet supply relative to the valid truck-removal path:
+  // deeper blocked trucks tend to appear earlier, while early blocker trucks
+  // tend to wait in the feeders. Random jitter prevents a predictable reverse
+  // list and the row order is therefore genuinely independent of gen.order.
+  for(let oi=0;oi<gen.order.length;oi++){
+    const t=byId.get(gen.order[oi]);
+    if(!t)continue;
+    const rows=t.capacity/4;
+    for(let k=0;k<rows;k++){
+      ranked.push({color:t.color,rank:oi*1.35+r()*gen.order.length*.55});
+    }
+  }
+  ranked.sort((a,b)=>b.rank-a.rank);
+
+  // Break up long same-colour runs without destroying the deeper-truck bias.
+  for(let i=1;i<ranked.length;i++){
+    if(ranked[i].color===ranked[i-1].color){
+      let swap=-1;
+      for(let j=i+1;j<Math.min(ranked.length,i+10);j++){
+        if(ranked[j].color!==ranked[i-1].color){swap=j;break}
+      }
+      if(swap>=0)[ranked[i],ranked[swap]]=[ranked[swap],ranked[i]];
+    }
+  }
+  return ranked.map(x=>x.color);
+}
+function simulateParkingSequence(gen){
+  if(!Array.isArray(gen.sweetRows)||!gen.sweetRows.length)return{solvable:false,maxParked:99,forcedWrong:0};
+
+  const byId=new Map(allGeneratedTrucks(gen).map(t=>[t.id,t]));
+  const available=gen.sweetRows.slice(0,LOOP_ROWS);
+  const future=gen.sweetRows.slice(LOOP_ROWS);
+  const parked=[];
+  let maxParked=0,forcedWrong=0,consumed=0;
+
+  function resolve(){
+    let progress=true,safety=0;
+    while(progress&&safety++<10000){
+      progress=false;
+      for(let ai=0;ai<available.length;ai++){
+        const color=available[ai];
+        const pi=parked.findIndex(p=>p.color===color&&p.need>0);
+        if(pi<0)continue;
+
+        parked[pi].need--;
+        available.splice(ai,1);
+        consumed++;
+        if(future.length)available.push(future.shift());
+        if(parked[pi].need<=0)parked.splice(pi,1);
+        progress=true;
+        break;
+      }
+    }
+  }
+
+  for(const id of gen.order){
+    const t=byId.get(id);
+    if(!t)return{solvable:false,maxParked:99,forcedWrong};
+
+    const hasNow=available.includes(t.color);
+    if(!hasNow)forcedWrong++;
+    parked.push({id:t.id,color:t.color,need:t.capacity/4});
+    maxParked=Math.max(maxParked,parked.length);
+
+    resolve();
+    if(parked.length>4)return{solvable:false,maxParked,forcedWrong};
+  }
+
+  resolve();
+  return{
+    solvable:parked.length===0&&future.length===0&&available.length===0,
+    maxParked,
+    forcedWrong,
+    consumed
+  };
+}
+function generationDifficultyScore(gen,parking){
+  const physical=gen.trucks;
+  const free=physical.filter(t=>canDriveOut(t,physical));
+  const blockers=physical.map(t=>blockingTruckIds(t,physical).length);
+  const multi=blockers.filter(n=>n>=2).length;
+  const maxBlock=Math.max(0,...blockers);
+  const freeColors=new Set(free.map(t=>t.color));
+  const unavailableColors=new Set(physical.filter(t=>!canDriveOut(t,physical)&&!freeColors.has(t.color)).map(t=>t.color)).size;
+
+  return(
+    Math.max(0,6-free.length)*2.4+
+    multi*.55+
+    maxBlock*1.2+
+    unavailableColors*1.8+
+    Math.min(5,parking.forcedWrong)*1.25+
+    parking.maxParked*1.2+
+    (gen.garage?gen.garage.queue.length*1.1:0)
+  );
+}
+function applyHiddenTruckColours(gen,r,n,profile){
+  if(n<3||profile.hiddenChance<=0)return;
+  const hostId=gen.garage?.currentId;
+  const candidates=gen.trucks.filter(t=>
+    t.id!==hostId&&
+    blockingTruckIds(t,gen.trucks).length>=2
+  );
+
+  let hidden=0;
+  for(const t of candidates){
+    if(r()<profile.hiddenChance){
+      t.hideColor=true;
+      t.revealed=false;
+      hidden++;
+    }
+  }
+
+  // Once the mechanic is established, ensure a qualifying level actually
+  // demonstrates it instead of occasionally randomising to zero hidden trucks.
+  if(n>=5&&hidden===0&&candidates.length){
+    candidates[0].hideColor=true;
+    candidates[0].revealed=false;
+  }
+}
 function validateGeneratedLevel(gen){
-  if(!gen||!Array.isArray(gen.trucks)||!Array.isArray(gen.order)||gen.trucks.length!==gen.order.length)return false;
-  if(gen.trucks.some(t=>t.capacity<=0||t.capacity%4!==0))return false;
+  if(!gen||!Array.isArray(gen.trucks)||!Array.isArray(gen.order)||!Array.isArray(gen.sweetRows))return false;
+  const all=allGeneratedTrucks(gen);
+  if(all.length!==gen.order.length)return false;
+  if(new Set(gen.order).size!==gen.order.length)return false;
+  if(all.some(t=>t.capacity<=0||t.capacity%4!==0))return false;
 
+  // Geometry/garage solver: only the surfaced garage truck exists in the yard.
   const remaining=gen.trucks.map(t=>({...t}));
+  const garageQueue=gen.garage?gen.garage.queue.map(t=>({...t})):[];
+  let garageCurrent=gen.garage?.currentId||null;
+
   for(const id of gen.order){
     const idx=remaining.findIndex(t=>t.id===id);
     if(idx<0||!canDriveOut(remaining[idx],remaining))return false;
+    const removed=remaining[idx];
     remaining.splice(idx,1);
-  }
-  if(remaining.length)return false;
 
-  const q=makeQueue(gen);
-  if(q.length%4!==0)return false;
-  for(let i=0;i<q.length;i+=4){
-    if(q.slice(i,i+4).length!==4)return false;
-    const c=q[i].color;
-    if(q.slice(i,i+4).some(x=>x.color!==c))return false;
+    if(garageCurrent&&removed.id===garageCurrent){
+      const next=garageQueue.shift();
+      if(next){
+        next.x=gen.garage.x;next.y=gen.garage.y;next.angle=gen.garage.angle;
+        remaining.push(next);
+        garageCurrent=next.id;
+      }else garageCurrent=null;
+    }
   }
-  return q.length===gen.trucks.reduce((sum,t)=>sum+t.capacity,0);
+  if(remaining.length||garageQueue.length)return false;
+
+  const expectedRows=all.reduce((sum,t)=>sum+t.capacity/4,0);
+  if(gen.sweetRows.length!==expectedRows)return false;
+
+  const rowCounts=new Map();
+  for(const color of gen.sweetRows)rowCounts.set(color,(rowCounts.get(color)||0)+1);
+  const truckCounts=new Map();
+  for(const t of all)truckCounts.set(t.color,(truckCounts.get(t.color)||0)+t.capacity/4);
+  for(const [color,count] of truckCounts)if(rowCounts.get(color)!==count)return false;
+
+  return simulateParkingSequence(gen).solvable;
 }
+function finalizeCandidate(trucks,baseOrder,r,n){
+  const profile=difficultyProfile(n);
+  const clear=initialClearCount(trucks);
+  if(clear<profile.minFree||clear>profile.maxFree)return null;
 
+  const multi=trucks.filter(t=>blockingTruckIds(t,trucks).length>=2).length;
+  if(multi<trucks.length*profile.minMulti)return null;
+
+  const order=[...baseOrder];
+  const garage=maybeAddGarage(trucks,order,r,n,profile);
+  const gen={trucks,order,garage,sweetRows:[]};
+  assignChallengeColors(gen,r,n);
+
+  let best=null;
+  for(let sweetAttempt=0;sweetAttempt<80;sweetAttempt++){
+    gen.sweetRows=buildIndependentSweetRows(gen,r);
+    const parking=simulateParkingSequence(gen);
+    if(!parking.solvable)continue;
+
+    const score=generationDifficultyScore(gen,parking);
+    if(!best||score>best.score)best={rows:[...gen.sweetRows],parking,score};
+    if(score>=profile.target)break;
+  }
+  if(!best||best.score<profile.target)return null;
+
+  gen.sweetRows=best.rows;
+  gen.difficulty={score:best.score,maxParked:best.parking.maxParked,forcedWrong:best.parking.forcedWrong,initialFree:clear};
+  applyHiddenTruckColours(gen,r,n,profile);
+
+  return validateGeneratedLevel(gen)?gen:null;
+}
 function generateLevel(n){
-  for(let attempt=0;attempt<180;attempt++){
-    const R=rng(n*73471+attempt*977+19),count=Math.min(17+Math.floor(n*.35),22),trucks=[];
+  for(let attempt=0;attempt<280;attempt++){
+    const R=rng(n*73471+attempt*977+19);
+    const count=Math.min(16+Math.floor(n*.4),22);
+    const trucks=[];
+
     for(let i=0;i<count;i++){
       let placed=false;
-      for(let k=0;k<450&&!placed;k++){
+      for(let k=0;k<520&&!placed;k++){
         const kind=R()<.18?2:R()<.55?1:0;
         const length=[48,59,72][kind],width=[25,27,29][kind];
-        const a=choice(R,[0,Math.PI/4,Math.PI/2,3*Math.PI/4,Math.PI,5*Math.PI/4,3*Math.PI/2,7*Math.PI/4]);
-        const t={id:`t${i}`,x:rint(R,JAM.x+34,JAM.x+JAM.w-34),y:rint(R,JAM.y+34,JAM.y+JAM.h-34),angle:a,length,width,capacity:[20,28,36][kind],kind,color:'red'};
-        const poly=truckPoly(t); if(poly.some(p=>p.x<JAM.x+4||p.x>JAM.x+JAM.w-4||p.y<JAM.y+4||p.y>JAM.y+JAM.h-4))continue;
-        if(trucks.some(o=>polyOverlap(poly,truckPoly(o))))continue; trucks.push(t);placed=true;
+        const angle=choice(R,[0,Math.PI/4,Math.PI/2,3*Math.PI/4,Math.PI,5*Math.PI/4,3*Math.PI/2,7*Math.PI/4]);
+        const t={
+          id:`t${i}`,
+          x:rint(R,JAM.x+34,JAM.x+JAM.w-34),
+          y:rint(R,JAM.y+34,JAM.y+JAM.h-34),
+          angle,length,width,
+          capacity:[20,28,36][kind],kind,color:'red'
+        };
+        const poly=truckPoly(t);
+        if(poly.some(p=>p.x<JAM.x+4||p.x>JAM.x+JAM.w-4||p.y<JAM.y+4||p.y>JAM.y+JAM.h-4))continue;
+        if(trucks.some(o=>polyOverlap(poly,truckPoly(o))))continue;
+        trucks.push(t);placed=true;
       }
     }
     if(trucks.length<count-2)continue;
 
-    // Random placement only establishes orientations and a valid starting
-    // arrangement. Settle the trucks tightly together before determining the
-    // puzzle's blockers and solution order.
     compactTruckLayout(trucks);
 
-    const clear=initialClearCount(trucks); if(clear<2||clear>Math.max(6,trucks.length*.62))continue;
-    const order=removalOrder(trucks,R); if(!order)continue;
-    const palette=COLOR_NAMES.slice(0,Math.min(5+Math.floor(n/5),8));
-    const colorPlan=[]; for(let i=0;i<order.length;i++){let c=choice(R,palette);if(i>0&&c===colorPlan[i-1]&&R()<.7)c=choice(R,palette.filter(x=>x!==c));colorPlan.push(c)}
-    const byId=new Map(trucks.map(t=>[t.id,t])); order.forEach((id,i)=>byId.get(id).color=colorPlan[i]);
-    const gen={trucks,order};
-    if(validateGeneratedLevel(gen))return gen;
+    const baseOrder=removalOrder(trucks,R);
+    if(!baseOrder)continue;
+
+    const gen=finalizeCandidate(trucks,baseOrder,R,n);
+    if(gen)return gen;
   }
   return fallbackLevel(n);
 }
 function fallbackLevel(n){
+  // A deterministic fallback remains solver-checked, but is intentionally
+  // denser than the old two-column fallback so a rare generation miss does
+  // not suddenly collapse the difficulty.
   const R=rng(n*91+4);
-  const ys=[540,575,610,645,680,715,750,785];
-  const trucks=ys.map((y,i)=>{
-    const kind=i%3;
-    const left=i%2===0;
-    return{
-      id:`t${i}`,
-      x:left?82:338,
-      y,
-      angle:left?Math.PI:0,
-      kind,
-      length:[48,59,72][kind],
-      width:[25,27,29][kind],
-      capacity:[20,28,36][kind],
-      color:choice(R,COLOR_NAMES.slice(0,5))
-    };
-  });
+  const spots=[
+    [74,552,0],[128,552,Math.PI],[184,552,0],[240,552,Math.PI],[296,552,0],[350,552,Math.PI],
+    [82,606,Math.PI/2],[140,610,3*Math.PI/2],[202,610,Math.PI/2],[264,610,3*Math.PI/2],[330,610,Math.PI/2],
+    [92,674,0],[154,674,Math.PI],[216,674,0],[278,674,Math.PI],[340,674,0]
+  ];
+  const trucks=[];
+  for(let i=0;i<spots.length;i++){
+    const kind=i%3===2?1:0;
+    trucks.push({
+      id:`t${i}`,x:spots[i][0],y:spots[i][1],angle:spots[i][2],
+      kind,length:[48,59,72][kind],width:[25,27,29][kind],capacity:[20,28,36][kind],color:'red'
+    });
+  }
+  // If the handcrafted packing happens to overlap after a future art-size
+  // change, fall back to the previous guaranteed sparse pattern.
+  const legal=trucks.every((t,i)=>truckFullyInsideJam(t,t.x,t.y,4)&&!trucks.slice(0,i).some(o=>polyOverlap(truckPoly(t),truckPoly(o))));
+  if(!legal){
+    const ys=[540,575,610,645,680,715,750,785];
+    trucks.length=0;
+    ys.forEach((y,i)=>{
+      const kind=i%3,left=i%2===0;
+      trucks.push({id:`t${i}`,x:left?82:338,y,angle:left?Math.PI:0,kind,length:[48,59,72][kind],width:[25,27,29][kind],capacity:[20,28,36][kind],color:'red'});
+    });
+  }
+
   compactTruckLayout(trucks);
   const order=removalOrder(trucks,R);
   if(!order)throw new Error('Guaranteed fallback unexpectedly unsolvable');
-  const gen={trucks,order};
-  if(!validateGeneratedLevel(gen))throw new Error('Fallback validation failed');
-  return gen;
+
+  // Relax only the numeric difficulty threshold for fallback; all actual
+  // geometry, garage and four-slot parking solvability checks still apply.
+  const profile=difficultyProfile(n),savedTarget=profile.target;
+  profile.target=0;
+  const clear=initialClearCount(trucks);
+  const garage=maybeAddGarage(trucks,order,R,n,profile);
+  const gen={trucks,order,garage,sweetRows:[]};
+  assignChallengeColors(gen,R,n);
+
+  for(let i=0;i<120;i++){
+    gen.sweetRows=buildIndependentSweetRows(gen,R);
+    if(simulateParkingSequence(gen).solvable){
+      applyHiddenTruckColours(gen,R,n,profile);
+      if(validateGeneratedLevel(gen))return gen;
+    }
+  }
+  throw new Error('Fallback parking solver failed');
 }
 function makeQueue(gen){
-  const by=new Map(gen.trucks.map(t=>[t.id,t])),q=[];let cid=0;
-  for(const id of gen.order){
-    const t=by.get(id);
-    if(!t||t.capacity%4!==0)throw new Error('Invalid truck capacity for 4-sweet rows');
-    for(let i=0;i<t.capacity;i++)q.push({id:`c${cid++}`,color:t.color,visualIndex:q.length,entryT:1});
+  const q=[];let cid=0;
+  for(const color of gen.sweetRows){
+    for(let i=0;i<4;i++)q.push({id:`c${cid++}`,color,visualIndex:q.length,entryT:1});
   }
   return q;
 }
@@ -521,6 +827,7 @@ function splitSweetPools(gen){
   if(!loopRowsAreValid(rotation)||!rowsAreValid(leftFeed)||!rowsAreValid(rightFeed))throw new Error('Sweet pool row integrity failed');
   return{rotation,leftFeed,rightFeed};
 }
+
 function makeSlots(){
   const xs=[90,150,210,270,330];
   return xs.map((x,i)=>({x,y:SLOT_Y,w:46,h:72,type:i===4?'plus':'normal',active:i<4,truck:null}));
