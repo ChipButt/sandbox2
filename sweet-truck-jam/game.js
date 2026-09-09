@@ -278,6 +278,100 @@ function canDriveOut(t,trucks){
   for(let d=7;d<520;d+=7){const x=t.x+dx*d,y=t.y+dy*d,p=truckPoly(t,x,y);for(const o of others)if(polyOverlap(p,truckPoly(o)))return false;if(!insideJam(t,x,y))return true}
   return true;
 }
+function truckFullyInsideJam(t,x=t.x,y=t.y,margin=4){
+  const p=truckPoly(t,x,y);
+  return p.every(v=>
+    v.x>=JAM.x+margin&&
+    v.x<=JAM.x+JAM.w-margin&&
+    v.y>=JAM.y+margin&&
+    v.y<=JAM.y+JAM.h-margin
+  );
+}
+function truckPositionLegal(t,x,y,trucks){
+  if(!truckFullyInsideJam(t,x,y,4))return false;
+  const p=truckPoly(t,x,y);
+  for(const o of trucks){
+    if(o.id===t.id)continue;
+    if(polyOverlap(p,truckPoly(o)))return false;
+  }
+  return true;
+}
+function tryCompactStep(t,dx,dy,trucks,step=2.25){
+  const len=Math.hypot(dx,dy);
+  if(len<.001)return false;
+  const nx=dx/len,ny=dy/len;
+  const x=t.x+nx*step,y=t.y+ny*step;
+  if(!truckPositionLegal(t,x,y,trucks))return false;
+  t.x=x;t.y=y;
+  return true;
+}
+function compactTruckLayout(trucks){
+  if(trucks.length<2)return trucks;
+
+  // Repeatedly settle every vehicle into the occupied cluster. Each pass tries
+  // the direct inward movement first, then the axis components and nearest
+  // neighbour direction so a truck can use otherwise wasted pockets.
+  let still=0;
+  for(let pass=0;pass<180&&still<8;pass++){
+    let moved=0;
+    const cx=trucks.reduce((a,t)=>a+t.x,0)/trucks.length;
+    const cy=trucks.reduce((a,t)=>a+t.y,0)/trucks.length;
+
+    // Work from the outside in so exposed vehicles close the large gaps first.
+    const ordered=[...trucks].sort((a,b)=>
+      Math.hypot(b.x-cx,b.y-cy)-Math.hypot(a.x-cx,a.y-cy)
+    );
+
+    for(const t of ordered){
+      const dx=cx-t.x,dy=cy-t.y;
+      let did=false;
+
+      // Primary pull toward the cluster.
+      did=tryCompactStep(t,dx,dy,trucks,2.25);
+
+      // If another truck blocks the diagonal route, try closing either axis.
+      if(!did&&Math.abs(dx)>.75)did=tryCompactStep(t,Math.sign(dx),0,trucks,1.75);
+      if(!did&&Math.abs(dy)>.75)did=tryCompactStep(t,0,Math.sign(dy),trucks,1.75);
+
+      // Finally pull toward the nearest neighbour. This removes isolated
+      // pockets that are not exactly on the centre-of-mass line.
+      if(!did){
+        let nearest=null,nearestD=Infinity;
+        for(const o of trucks){
+          if(o.id===t.id)continue;
+          const d=(o.x-t.x)*(o.x-t.x)+(o.y-t.y)*(o.y-t.y);
+          if(d<nearestD){nearest=o;nearestD=d}
+        }
+        if(nearest)did=tryCompactStep(t,nearest.x-t.x,nearest.y-t.y,trucks,1.5);
+      }
+
+      if(did)moved++;
+    }
+
+    if(moved===0)still++;
+    else still=0;
+  }
+
+  // A final fine-grain settling pass closes sub-pixel-looking gaps left by the
+  // coarse compaction above.
+  for(let pass=0;pass<40;pass++){
+    let moved=0;
+    const cx=trucks.reduce((a,t)=>a+t.x,0)/trucks.length;
+    const cy=trucks.reduce((a,t)=>a+t.y,0)/trucks.length;
+    for(const t of trucks){
+      const dx=cx-t.x,dy=cy-t.y;
+      if(tryCompactStep(t,dx,dy,trucks,.65))moved++;
+      else{
+        if(Math.abs(dx)>.2&&tryCompactStep(t,Math.sign(dx),0,trucks,.5))moved++;
+        else if(Math.abs(dy)>.2&&tryCompactStep(t,0,Math.sign(dy),trucks,.5))moved++;
+      }
+    }
+    if(!moved)break;
+  }
+
+  return trucks;
+}
+
 function initialClearCount(trucks){return trucks.filter(t=>canDriveOut(t,trucks)).length}
 function removalOrder(trucks,r){const rem=trucks.map(t=>({...t})),out=[];while(rem.length){const free=rem.filter(t=>canDriveOut(t,rem));if(!free.length)return null;const t=choice(r,free);out.push(t.id);rem.splice(rem.findIndex(x=>x.id===t.id),1)}return out}
 
@@ -318,6 +412,12 @@ function generateLevel(n){
       }
     }
     if(trucks.length<count-2)continue;
+
+    // Random placement only establishes orientations and a valid starting
+    // arrangement. Settle the trucks tightly together before determining the
+    // puzzle's blockers and solution order.
+    compactTruckLayout(trucks);
+
     const clear=initialClearCount(trucks); if(clear<2||clear>Math.max(6,trucks.length*.62))continue;
     const order=removalOrder(trucks,R); if(!order)continue;
     const palette=COLOR_NAMES.slice(0,Math.min(5+Math.floor(n/5),8));
@@ -346,6 +446,7 @@ function fallbackLevel(n){
       color:choice(R,COLOR_NAMES.slice(0,5))
     };
   });
+  compactTruckLayout(trucks);
   const order=removalOrder(trucks,R);
   if(!order)throw new Error('Guaranteed fallback unexpectedly unsolvable');
   const gen={trucks,order};
