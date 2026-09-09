@@ -271,8 +271,8 @@ function polyOverlap(a,b,gap=TRUCK_GAP){
   for(const poly of [a,b])for(let i=0;i<poly.length;i++){
     const p=poly[i],q=poly[(i+1)%poly.length],ex=q.x-p.x,ey=q.y-p.y,l=Math.hypot(ex,ey)||1,ax=-ey/l,ay=ex/l;
     const A=project(a,ax,ay),B=project(b,ax,ay);
-    // Exactly 1 px of separation is legal. Anything closer counts as a
-    // collision so settled yard trucks retain a visible one-pixel gap.
+    // Exactly TRUCK_GAP pixels of separation is legal. Anything closer
+    // counts as a collision so settled yard trucks retain the requested gap.
     if(A[1]<=B[0]-gap||B[1]<=A[0]-gap)return false;
   }
   return true;
@@ -313,7 +313,7 @@ function tryCompactStep(t,dx,dy,trucks,step=2.25){
     return true;
   }
 
-  // If the requested step would cross the 1 px clearance boundary, binary
+  // If the requested step would cross the clearance boundary, binary
   // search the remaining distance so the truck settles right up to that
   // boundary instead of stopping a whole compaction step away.
   let lo=0,hi=step;
