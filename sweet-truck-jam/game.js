@@ -21,22 +21,24 @@ const overlaySecondary=document.getElementById('overlaySecondary');
 
 let dpr=1,scale=1,ox=0,oy=0,last=0,level=1,state=null,toastTimer=0;
 let candyPath=[];
-const ROTATION_CAPACITY=144;
+const ROTATION_CAPACITY=80;
 const ROTATION_COLS=4;
 const FEEDER_COLS=4;
-const ROTATION_SPEED_ROWS=4.0;
+const ROTATION_SPEED_ROWS=2.2;
 const LOOP_ROWS=ROTATION_CAPACITY/ROTATION_COLS;
-if(LOOP_ROWS>36)throw new Error('Central rotation may not exceed 36 rows');
-const LEFT_JOIN_ROW=4;
-const RIGHT_JOIN_ROW=21;
-const OUTLET_ROW=13;
+if(LOOP_ROWS>20)throw new Error('Central rotation may not exceed 20 rows');
+const LEFT_JOIN_ROW=2;
+const RIGHT_JOIN_ROW=12;
+const OUTLET_ROW=7;
 const OUTLET_SOURCE_ROW=(OUTLET_ROW-1+LOOP_ROWS)%LOOP_ROWS;
 const LOAD_MOUTH={x:210,y:344};
-const SWEET_RADIUS=7;
-const CENTRAL_LANE_SPACING=13.2;
-const FEED_LANE_SPACING=13.0;
-const FEED_ROW_SPACING=14.5;
-const FEED_CORNER_RADIUS=42;
+const SWEET_RADIUS=14;
+const CENTRAL_LANE_SPACING=26.4;
+const FEED_LANE_SPACING=26.0;
+const FEED_ROW_SPACING=29.0;
+const FEED_CORNER_RADIUS=58;
+const CENTRAL_TRACK_INSET=54;
+const CENTRAL_ROW_INSET=CENTRAL_TRACK_INSET/2;
 const pointer={x:0,y:0};
 
 function resize(){
@@ -171,23 +173,46 @@ function makeCandyPath(){
   return dense;
 }
 candyPath=makeCandyPath();
+const LOOP_CENTER=candyPath.reduce((a,p)=>({x:a.x+p.x/candyPath.length,y:a.y+p.y/candyPath.length}),{x:0,y:0});
 
-function loopPose(row,phase=state?.rotationPhase||0){
-  const rowProgress=((row+phase)%LOOP_ROWS+LOOP_ROWS)%LOOP_ROWS;
-  const exact=(rowProgress/LOOP_ROWS)*(candyPath.length-1);
+function pathPoseAtExact(exact){
   const i0=Math.floor(exact),i1=(i0+1)%candyPath.length,t=exact-i0;
   const p0=candyPath[i0]||candyPath[0],p1=candyPath[i1]||candyPath[0];
   const x=lerp(p0.x,p1.x,t),y=lerp(p0.y,p1.y,t);
 
-  // Centred tangent = gradual row rotation through a bend instead of an
-  // instantaneous pivot when crossing a sample boundary.
   const im1=(i0-2+candyPath.length)%candyPath.length;
   const ip2=(i1+2)%candyPath.length;
   const pa=candyPath[im1],pb=candyPath[ip2];
   let tx=pb.x-pa.x,ty=pb.y-pa.y;
   const len=Math.hypot(tx,ty)||1;tx/=len;ty/=len;
 
-  return{x,y,tx,ty,nx:-ty,ny:tx};
+  let nx=-ty,ny=tx;
+  const toCenterX=LOOP_CENTER.x-x,toCenterY=LOOP_CENTER.y-y;
+  if(nx*toCenterX+ny*toCenterY<0){nx=-nx;ny=-ny}
+
+  return{x,y,tx,ty,nx,ny};
+}
+function inwardOffsetPath(distance){
+  return candyPath.map((_,i)=>{
+    const p=pathPoseAtExact(i);
+    return{x:p.x+p.nx*distance,y:p.y+p.ny*distance};
+  });
+}
+const innerTrackPath=inwardOffsetPath(CENTRAL_TRACK_INSET);
+
+function loopPose(row,phase=state?.rotationPhase||0){
+  const rowProgress=((row+phase)%LOOP_ROWS+LOOP_ROWS)%LOOP_ROWS;
+  const exact=(rowProgress/LOOP_ROWS)*(candyPath.length-1);
+  const p=pathPoseAtExact(exact);
+
+  // The row centreline moves halfway into the widened inner section. This
+  // keeps the loop's outside silhouette almost unchanged while giving the
+  // doubled sweets enough width toward the centre of the loop.
+  return{
+    x:p.x+p.nx*CENTRAL_ROW_INSET,
+    y:p.y+p.ny*CENTRAL_ROW_INSET,
+    tx:p.tx,ty:p.ty,nx:p.nx,ny:p.ny
+  };
 }
 function candyPos(index,phase=state?.rotationPhase||0){
   const row=Math.floor(index/ROTATION_COLS),col=index%ROTATION_COLS,p=loopPose(row,phase);
@@ -198,7 +223,7 @@ function feederGeometry(side){
   const join=loopPose(side==='left'?LEFT_JOIN_ROW:RIGHT_JOIN_ROW,0);
   const outerX=side==='left'?6:414;
   const radius=FEED_CORNER_RADIUS;
-  const mouth={x:side==='left'?join.x-43:join.x+43,y:join.y};
+  const mouth={x:side==='left'?join.x-58:join.x+58,y:join.y};
   return{join,outerX,radius,mouth};
 }
 function feederRowPose(side,rowVisual){
@@ -252,8 +277,8 @@ function cubicPose(p0,p1,p2,p3,u){
 function feederEntryPoint(side,col,u,targetIndex){
   const start=feederRowPose(side,0);
   const target=loopPose(Math.floor(targetIndex/ROTATION_COLS),state.rotationPhase);
-  const c1={x:start.x+start.tx*28,y:start.y+start.ty*28};
-  const c2={x:target.x-target.tx*30,y:target.y-target.ty*30};
+  const c1={x:start.x+start.tx*40,y:start.y+start.ty*40};
+  const c2={x:target.x-target.tx*42,y:target.y-target.ty*42};
   const p=cubicPose(
     {x:start.x,y:start.y},c1,c2,{x:target.x,y:target.y},u
   );
@@ -444,9 +469,9 @@ function removalOrder(trucks,r){
 function difficultyProfile(n){
   if(n<=2)return{maxFree:5,garageChance:0,hiddenChance:0,shuffleMoves:1};
   if(n<=4)return{maxFree:5,garageChance:.22,hiddenChance:.25,shuffleMoves:2};
-  if(n<=7)return{maxFree:4,garageChance:.55,hiddenChance:.48,shuffleMoves:3};
-  if(n<=12)return{maxFree:4,garageChance:.68,hiddenChance:.58,shuffleMoves:4};
-  return{maxFree:4,garageChance:.76,hiddenChance:.68,shuffleMoves:5};
+  if(n<=7)return{maxFree:5,garageChance:.55,hiddenChance:.48,shuffleMoves:3};
+  if(n<=12)return{maxFree:5,garageChance:.68,hiddenChance:.58,shuffleMoves:4};
+  return{maxFree:5,garageChance:.76,hiddenChance:.68,shuffleMoves:5};
 }
 function allGeneratedTrucks(gen){return gen.garage?[...gen.trucks,...gen.garage.queue]:[...gen.trucks]}
 function addUndergroundGarage(gen,r,n){
@@ -697,7 +722,7 @@ function processFeederJunctions(){
 function start(n){
   level=n;state=newState(n);
   if(!loopRowsAreValid(state.rotation)||!rowsAreValid(state.leftFeed)||!rowsAreValid(state.rightFeed))throw new Error('Level started with an invalid sweet row');
-  if(state.rotation.length!==144)throw new Error('Central loop must contain exactly 36 row slots');
+  if(state.rotation.length!==80)throw new Error('Central loop must contain exactly 20 row slots');
   overlay.classList.add('hidden');saveLevel();showToast('Tap a truck with a clear path');
 }
 function saveLevel(){try{localStorage.setItem('sweet-fever-level',String(level))}catch(_){}}
@@ -722,13 +747,13 @@ function drawCrowdTrack(){
     const R=g.radius;
     const tangentX=side==='left'?g.outerX+R:g.outerX-R;
     const target=loopPose(side==='left'?LEFT_JOIN_ROW:RIGHT_JOIN_ROW,0);
-    const c1={x:g.mouth.x+(side==='left'?28:-28),y:g.mouth.y};
-    const c2={x:target.x-target.tx*30,y:target.y-target.ty*30};
+    const c1={x:g.mouth.x+(side==='left'?40:-40),y:g.mouth.y};
+    const c2={x:target.x-target.tx*42,y:target.y-target.ty*42};
 
     for(const stroke of [
-      {w:68,c:'#aebbc4'},
-      {w:62,c:'#f7fafc'},
-      {w:56,c:'#d6e0e6'}
+      {w:124,c:'#aebbc4'},
+      {w:118,c:'#f7fafc'},
+      {w:112,c:'#d6e0e6'}
     ]){
       ctx.beginPath();
       ctx.moveTo(g.outerX,-100);
@@ -740,18 +765,21 @@ function drawCrowdTrack(){
     }
   }
 
-  // Draw the central loop over the feeder endpoints. This leaves only the
-  // intended opening/connection visible and removes the overlapping bulb.
+  // Widen the central loop inward only. The original path preserves the
+  // outside silhouette; the second path extends the same layered track toward
+  // the centre. Their union creates enough room for four 28 px sweets.
   ctx.lineCap='round';
   for(const stroke of [
     {w:72,c:'#aebbc4'},
     {w:66,c:'#f7fafc'},
     {w:60,c:'#d6e0e6'}
   ]){
-    ctx.beginPath();
-    candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
-    ctx.closePath();
-    ctx.strokeStyle=stroke.c;ctx.lineWidth=stroke.w;ctx.stroke();
+    for(const path of [candyPath,innerTrackPath]){
+      ctx.beginPath();
+      path.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+      ctx.closePath();
+      ctx.strokeStyle=stroke.c;ctx.lineWidth=stroke.w;ctx.stroke();
+    }
   }
 
   const outlet=loopPose(OUTLET_ROW,0);
@@ -805,9 +833,9 @@ function drawCandy(c,index){
 }
 function drawSweetAt(p,color,r=SWEET_RADIUS){
   ctx.save();ctx.translate(p.x,p.y);
-  ctx.beginPath();ctx.arc(1.9,2.8,r+.15,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.17)';ctx.fill();
+  ctx.beginPath();ctx.arc(r*.27,r*.40,r+.3,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.17)';ctx.fill();
   ctx.beginPath();ctx.arc(0,0,r,0,Math.PI*2);ctx.fillStyle=COLORS[color];ctx.fill();
-  ctx.beginPath();ctx.arc(-2.2,-2.3,2.0,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.43)';ctx.fill();
+  ctx.beginPath();ctx.arc(-r*.31,-r*.33,r*.28,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.43)';ctx.fill();
   ctx.restore();
 }
 function drawFeederRows(feed,side,dt){
