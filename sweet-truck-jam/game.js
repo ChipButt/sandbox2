@@ -301,33 +301,24 @@ function truckPositionLegal(t,x,y,trucks){
   }
   return true;
 }
-function tryCompactStep(t,dx,dy,trucks,step=2.25){
+function tryCompactStep(t,dx,dy,trucks,step=2.25,precise=false){
   const len=Math.hypot(dx,dy);
   if(len<.001)return false;
-  const nx=dx/len,ny=dy/len;
-  const ox=t.x,oy=t.y;
+  const nx=dx/len,ny=dy/len,ox=t.x,oy=t.y;
   const tx=ox+nx*step,ty=oy+ny*step;
 
   if(truckPositionLegal(t,tx,ty,trucks)){
-    t.x=tx;t.y=ty;
-    return true;
+    t.x=tx;t.y=ty;return true;
   }
+  if(!precise)return false;
 
-  // If the requested step would cross the 3 px clearance boundary, binary
-  // search the remaining distance so the truck settles right up to that
-  // boundary instead of stopping a whole compaction step away.
   let lo=0,hi=step;
-  for(let i=0;i<12;i++){
-    const mid=(lo+hi)/2;
-    const x=ox+nx*mid,y=oy+ny*mid;
-    if(truckPositionLegal(t,x,y,trucks))lo=mid;
-    else hi=mid;
+  for(let i=0;i<8;i++){
+    const mid=(lo+hi)/2,x=ox+nx*mid,y=oy+ny*mid;
+    if(truckPositionLegal(t,x,y,trucks))lo=mid;else hi=mid;
   }
-
-  if(lo<=.015)return false;
-  t.x=ox+nx*lo;
-  t.y=oy+ny*lo;
-  return true;
+  if(lo<=.02)return false;
+  t.x=ox+nx*lo;t.y=oy+ny*lo;return true;
 }
 function compactTruckLayout(trucks){
   if(trucks.length<2)return trucks;
@@ -336,7 +327,7 @@ function compactTruckLayout(trucks){
   // the direct inward movement first, then the axis components and nearest
   // neighbour direction so a truck can use otherwise wasted pockets.
   let still=0;
-  for(let pass=0;pass<180&&still<8;pass++){
+  for(let pass=0;pass<64&&still<5;pass++){
     let moved=0;
     const cx=trucks.reduce((a,t)=>a+t.x,0)/trucks.length;
     const cy=trucks.reduce((a,t)=>a+t.y,0)/trucks.length;
@@ -378,16 +369,16 @@ function compactTruckLayout(trucks){
 
   // A final fine-grain settling pass closes sub-pixel-looking gaps left by the
   // coarse compaction above.
-  for(let pass=0;pass<40;pass++){
+  for(let pass=0;pass<16;pass++){
     let moved=0;
     const cx=trucks.reduce((a,t)=>a+t.x,0)/trucks.length;
     const cy=trucks.reduce((a,t)=>a+t.y,0)/trucks.length;
     for(const t of trucks){
       const dx=cx-t.x,dy=cy-t.y;
-      if(tryCompactStep(t,dx,dy,trucks,.65))moved++;
+      if(tryCompactStep(t,dx,dy,trucks,.65,true))moved++;
       else{
-        if(Math.abs(dx)>.2&&tryCompactStep(t,Math.sign(dx),0,trucks,.5))moved++;
-        else if(Math.abs(dy)>.2&&tryCompactStep(t,0,Math.sign(dy),trucks,.5))moved++;
+        if(Math.abs(dx)>.2&&tryCompactStep(t,Math.sign(dx),0,trucks,.5,true))moved++;
+        else if(Math.abs(dy)>.2&&tryCompactStep(t,0,Math.sign(dy),trucks,.5,true))moved++;
       }
     }
     if(!moved)break;
@@ -412,13 +403,7 @@ function removalOrder(trucks,r){
   while(rem.length){
     const free=rem.filter(t=>canDriveOut(t,rem));
     if(!free.length)return null;
-    const scored=free.map(t=>{
-      const before=new Set(free.map(x=>x.id));
-      const after=rem.filter(x=>x.id!==t.id);
-      const newly=after.filter(x=>!before.has(x.id)&&canDriveOut(x,after)).length;
-      return{t,score:Math.abs(newly-1)+r()*.45};
-    }).sort((a,b)=>a.score-b.score);
-    const t=scored[0].t;
+    const t=choice(r,free);
     out.push(t.id);
     rem.splice(rem.findIndex(x=>x.id===t.id),1);
   }
@@ -426,10 +411,10 @@ function removalOrder(trucks,r){
 }
 function difficultyProfile(n){
   if(n<=2)return{maxFree:5,garageChance:0,hiddenChance:0,shuffleMoves:1};
-  if(n<=4)return{maxFree:4,garageChance:.22,hiddenChance:.25,shuffleMoves:2};
-  if(n<=7)return{maxFree:3,garageChance:.55,hiddenChance:.48,shuffleMoves:3};
-  if(n<=12)return{maxFree:3,garageChance:.68,hiddenChance:.58,shuffleMoves:4};
-  return{maxFree:3,garageChance:.76,hiddenChance:.68,shuffleMoves:5};
+  if(n<=4)return{maxFree:5,garageChance:.22,hiddenChance:.25,shuffleMoves:2};
+  if(n<=7)return{maxFree:4,garageChance:.55,hiddenChance:.48,shuffleMoves:3};
+  if(n<=12)return{maxFree:4,garageChance:.68,hiddenChance:.58,shuffleMoves:4};
+  return{maxFree:4,garageChance:.76,hiddenChance:.68,shuffleMoves:5};
 }
 function allGeneratedTrucks(gen){return gen.garage?[...gen.trucks,...gen.garage.queue]:[...gen.trucks]}
 function addUndergroundGarage(gen,r,n){
@@ -557,7 +542,7 @@ function finishGeneratedCluster(trucks,order,R,n){
 }
 function generateLevel(n){
   const profile=difficultyProfile(n);
-  for(let attempt=0;attempt<180;attempt++){
+  for(let attempt=0;attempt<72;attempt++){
     const R=rng(n*73471+attempt*977+19),trucks=buildRandomCluster(n,R,false);if(!trucks)continue;
     const clear=initialClearCount(trucks);if(clear<2||clear>profile.maxFree)continue;
     const order=removalOrder(trucks,R);if(!order)continue;
@@ -566,7 +551,7 @@ function generateLevel(n){
   return fallbackLevel(n);
 }
 function fallbackLevel(n){
-  for(let attempt=0;attempt<420;attempt++){
+  for(let attempt=0;attempt<140;attempt++){
     const R=rng(n*191+attempt*1297+401),trucks=buildRandomCluster(n,R,true);if(!trucks)continue;
     const clear=initialClearCount(trucks);if(clear<2||clear>7)continue;
     const order=removalOrder(trucks,R);if(!order)continue;
