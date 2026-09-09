@@ -399,15 +399,47 @@ function blockingTruckIds(t,trucks){
   return[...ids];
 }
 function removalOrder(trucks,r){
-  const rem=trucks.map(t=>({...t})),out=[];
-  while(rem.length){
-    const free=rem.filter(t=>canDriveOut(t,rem));
-    if(!free.length)return null;
-    const t=choice(r,free);
-    out.push(t.id);
-    rem.splice(rem.findIndex(x=>x.id===t.id),1);
+  const n=trucks.length;
+  if(n===0)return[];
+  if(n>30)return null;
+
+  const fullMask=(1<<n)-1;
+  const dead=new Set();
+  let nodes=0;
+  const nodeLimit=9000;
+
+  function members(mask){
+    const out=[];
+    for(let i=0;i<n;i++)if(mask&(1<<i))out.push(trucks[i]);
+    return out;
   }
-  return out;
+  function solve(mask){
+    if(mask===0)return[];
+    if(dead.has(mask)||nodes++>nodeLimit)return null;
+
+    const rem=members(mask),free=[];
+    for(let i=0;i<n;i++){
+      if(!(mask&(1<<i)))continue;
+      if(canDriveOut(trucks[i],rem))free.push(i);
+    }
+    if(!free.length){dead.add(mask);return null}
+
+    // Vary equivalent solutions by seed, but backtrack if a choice later jams.
+    for(let i=free.length-1;i>0;i--){
+      const j=Math.floor(r()*(i+1));
+      [free[i],free[j]]=[free[j],free[i]];
+    }
+
+    for(const i of free){
+      const rest=solve(mask&~(1<<i));
+      if(rest)return[trucks[i].id,...rest];
+    }
+
+    dead.add(mask);
+    return null;
+  }
+
+  return solve(fullMask);
 }
 function difficultyProfile(n){
   if(n<=2)return{maxFree:5,garageChance:0,hiddenChance:0,shuffleMoves:1};
@@ -542,7 +574,7 @@ function finishGeneratedCluster(trucks,order,R,n){
 }
 function generateLevel(n){
   const profile=difficultyProfile(n);
-  for(let attempt=0;attempt<72;attempt++){
+  for(let attempt=0;attempt<18;attempt++){
     const R=rng(n*73471+attempt*977+19),trucks=buildRandomCluster(n,R,false);if(!trucks)continue;
     const clear=initialClearCount(trucks);if(clear<2||clear>profile.maxFree)continue;
     const order=removalOrder(trucks,R);if(!order)continue;
@@ -551,7 +583,7 @@ function generateLevel(n){
   return fallbackLevel(n);
 }
 function fallbackLevel(n){
-  for(let attempt=0;attempt<140;attempt++){
+  for(let attempt=0;attempt<60;attempt++){
     const R=rng(n*191+attempt*1297+401),trucks=buildRandomCluster(n,R,true);if(!trucks)continue;
     const clear=initialClearCount(trucks);if(clear<2||clear>7)continue;
     const order=removalOrder(trucks,R);if(!order)continue;
