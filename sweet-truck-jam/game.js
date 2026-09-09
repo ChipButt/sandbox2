@@ -431,7 +431,7 @@ function removalOrder(trucks,r){
   const fullMask=(1<<n)-1;
   const dead=new Set();
   let nodes=0;
-  const nodeLimit=2600;
+  const nodeLimit=900;
 
   function members(mask){
     const out=[];
@@ -467,11 +467,11 @@ function removalOrder(trucks,r){
   return solve(fullMask);
 }
 function difficultyProfile(n){
-  if(n<=2)return{maxFree:5,garageChance:0,hiddenChance:0,shuffleMoves:1};
-  if(n<=4)return{maxFree:5,garageChance:.22,hiddenChance:.25,shuffleMoves:2};
-  if(n<=7)return{maxFree:6,garageChance:.55,hiddenChance:.48,shuffleMoves:3};
-  if(n<=12)return{maxFree:6,garageChance:.68,hiddenChance:.58,shuffleMoves:4};
-  return{maxFree:6,garageChance:.76,hiddenChance:.68,shuffleMoves:5};
+  if(n<=2)return{maxFree:8,garageChance:0,hiddenChance:0,shuffleMoves:1};
+  if(n<=4)return{maxFree:8,garageChance:.22,hiddenChance:.25,shuffleMoves:2};
+  if(n<=7)return{maxFree:8,garageChance:.55,hiddenChance:.48,shuffleMoves:3};
+  if(n<=12)return{maxFree:8,garageChance:.68,hiddenChance:.58,shuffleMoves:4};
+  return{maxFree:8,garageChance:.76,hiddenChance:.68,shuffleMoves:5};
 }
 function allGeneratedTrucks(gen){return gen.garage?[...gen.trucks,...gen.garage.queue]:[...gen.trucks]}
 function addUndergroundGarage(gen,r,n){
@@ -595,8 +595,8 @@ function buildRandomCluster(n,R,relaxed=false){
       const outward=Math.round(Math.atan2(y-cy,x-cx)/unit)*unit;
       const roll=R();
       let twist=0;
-      const straightChance=n<=2?.88:n<=7?.78:.72;
-      const sideChance=n<=2?.10:n<=7?.18:.20;
+      const straightChance=n<=2?.96:n<=7?.92:.88;
+      const sideChance=n<=2?.04:n<=7?.07:.10;
       if(roll>straightChance){
         const sign=R()<.5?-1:1;
         twist=roll<straightChance+sideChance?sign:sign*2;
