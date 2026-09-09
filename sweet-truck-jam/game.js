@@ -63,9 +63,9 @@ function roundedRect(x,y,w,h,r,fill,stroke,line=1){
 function text(s,x,y,size,fill='#fff',align='center',weight=900){ctx.fillStyle=fill;ctx.textAlign=align;ctx.textBaseline='middle';ctx.font=`${weight} ${size}px ui-rounded,system-ui,-apple-system`;ctx.fillText(s,x,y)}
 
 function makeCandyPath(){
-  // User-authored central loop from the shape editor.
-  // Keep the supplied vertices exactly; only resample each straight segment
-  // uniformly so the rows travel at a constant physical speed.
+  // User-authored loop, with conveyor-style rounded motion through each
+  // vertex. The supplied vertices still define the layout; only a short
+  // tangent section around each corner is replaced by a smooth turn.
   const vertices=[
     {x:100,y:90},
     {x:100,y:260},
@@ -78,20 +78,77 @@ function makeCandyPath(){
     {x:110,y:80}
   ];
 
-  const raw=[];
-  const closed=[...vertices,{...vertices[0]}];
+  const cornerCut=22;
+  const n=vertices.length;
+  const corners=[];
 
-  for(let i=1;i<closed.length;i++){
-    const a=closed[i-1],b=closed[i];
-    const length=Math.hypot(b.x-a.x,b.y-a.y);
-    const steps=Math.max(2,Math.ceil(length/3));
-    for(let j=0;j<steps;j++){
-      const t=j/steps;
+  function unit(a,b){
+    const dx=b.x-a.x,dy=b.y-a.y;
+    const d=Math.hypot(dx,dy)||1;
+    return{x:dx/d,y:dy/d,d};
+  }
+
+  for(let i=0;i<n;i++){
+    const prev=vertices[(i-1+n)%n];
+    const curr=vertices[i];
+    const next=vertices[(i+1)%n];
+
+    const incoming=unit(prev,curr);
+    const outgoing=unit(curr,next);
+
+    const cut=Math.min(
+      cornerCut,
+      incoming.d*.32,
+      outgoing.d*.32
+    );
+
+    corners.push({
+      vertex:curr,
+      enter:{
+        x:curr.x-incoming.x*cut,
+        y:curr.y-incoming.y*cut
+      },
+      exit:{
+        x:curr.x+outgoing.x*cut,
+        y:curr.y+outgoing.y*cut
+      }
+    });
+  }
+
+  const raw=[];
+
+  function addLine(a,b){
+    const len=Math.hypot(b.x-a.x,b.y-a.y);
+    const steps=Math.max(2,Math.ceil(len/2.5));
+    for(let i=0;i<steps;i++){
+      const t=i/steps;
       raw.push({x:lerp(a.x,b.x,t),y:lerp(a.y,b.y,t)});
     }
   }
-  raw.push({...vertices[0]});
 
+  function addCorner(a,c,b){
+    const approx=Math.hypot(c.x-a.x,c.y-a.y)+Math.hypot(b.x-c.x,b.y-c.y);
+    const steps=Math.max(10,Math.ceil(approx/1.5));
+    for(let i=0;i<steps;i++){
+      const t=i/steps,q=1-t;
+      raw.push({
+        x:q*q*a.x+2*q*t*c.x+t*t*b.x,
+        y:q*q*a.y+2*q*t*c.y+t*t*b.y
+      });
+    }
+  }
+
+  for(let i=0;i<n;i++){
+    const current=corners[i];
+    const next=corners[(i+1)%n];
+
+    addCorner(current.enter,current.vertex,current.exit);
+    addLine(current.exit,next.enter);
+  }
+  raw.push({...raw[0]});
+
+  // Uniform arc-length resampling makes the belt speed physically constant
+  // through both straights and bends.
   const cumulative=[0];
   for(let i=1;i<raw.length;i++){
     cumulative.push(cumulative[i-1]+Math.hypot(raw[i].x-raw[i-1].x,raw[i].y-raw[i-1].y));
@@ -99,11 +156,11 @@ function makeCandyPath(){
 
   const total=cumulative[cumulative.length-1];
   const dense=[];
-  const sampleCount=360;
+  const sampleCount=540;
   let cursor=1;
 
-  for(let n=0;n<sampleCount;n++){
-    const target=n/(sampleCount-1)*total;
+  for(let i=0;i<sampleCount;i++){
+    const target=i/(sampleCount-1)*total;
     while(cursor<cumulative.length-1&&cumulative[cursor]<target)cursor++;
     const a=raw[cursor-1],b=raw[cursor];
     const span=Math.max(.001,cumulative[cursor]-cumulative[cursor-1]);
@@ -121,7 +178,15 @@ function loopPose(row,phase=state?.rotationPhase||0){
   const i0=Math.floor(exact),i1=(i0+1)%candyPath.length,t=exact-i0;
   const p0=candyPath[i0]||candyPath[0],p1=candyPath[i1]||candyPath[0];
   const x=lerp(p0.x,p1.x,t),y=lerp(p0.y,p1.y,t);
-  let tx=p1.x-p0.x,ty=p1.y-p0.y;const len=Math.hypot(tx,ty)||1;tx/=len;ty/=len;
+
+  // Centred tangent = gradual row rotation through a bend instead of an
+  // instantaneous pivot when crossing a sample boundary.
+  const im1=(i0-2+candyPath.length)%candyPath.length;
+  const ip2=(i1+2)%candyPath.length;
+  const pa=candyPath[im1],pb=candyPath[ip2];
+  let tx=pb.x-pa.x,ty=pb.y-pa.y;
+  const len=Math.hypot(tx,ty)||1;tx/=len;ty/=len;
+
   return{x,y,tx,ty,nx:-ty,ny:tx};
 }
 function candyPos(index,phase=state?.rotationPhase||0){
