@@ -696,39 +696,110 @@ function finalizeCandidate(trucks,baseOrder,r,n){
 
   return validateGeneratedLevel(gen)?gen:null;
 }
-function generateLevel(n){
-  for(let attempt=0;attempt<280;attempt++){
-    const R=rng(n*73471+attempt*977+19);
-    const count=Math.min(16+Math.floor(n*.4),22);
-    const trucks=[];
+function buildChainLayout(n,r){
+  const profile=difficultyProfile(n);
+  const lanes=profile.maxFree;
+  const total=n<=2?15:n<=4?16:n<=12?18:14;
+  const base=Math.floor(total/lanes);
+  const extra=total%lanes;
+  const laneCounts=Array.from({length:lanes},(_,i)=>base+(i<extra?1:0));
 
-    for(let i=0;i<count;i++){
-      let placed=false;
-      for(let k=0;k<520&&!placed;k++){
-        const kind=R()<.18?2:R()<.55?1:0;
-        const length=[48,59,72][kind],width=[25,27,29][kind];
-        const angle=choice(R,[0,Math.PI/4,Math.PI/2,3*Math.PI/4,Math.PI,5*Math.PI/4,3*Math.PI/2,7*Math.PI/4]);
-        const t={
-          id:`t${i}`,
-          x:rint(R,JAM.x+34,JAM.x+JAM.w-34),
-          y:rint(R,JAM.y+34,JAM.y+JAM.h-34),
-          angle,length,width,
-          capacity:[20,28,36][kind],kind,color:'red'
-        };
-        const poly=truckPoly(t);
-        if(poly.some(p=>p.x<JAM.x+4||p.x>JAM.x+JAM.w-4||p.y<JAM.y+4||p.y>JAM.y+JAM.h-4))continue;
-        if(trucks.some(o=>polyOverlap(poly,truckPoly(o))))continue;
-        trucks.push(t);placed=true;
+  const laneKinds=[];
+  const laneWidths=[];
+  const maxSpan=JAM.w-18;
+
+  for(let li=0;li<lanes;li++){
+    const count=laneCounts[li];
+    const kinds=Array(count).fill(0);
+    let span=count*48+(count-1)*TRUCK_GAP;
+
+    // Upgrade random trucks while preserving the exact 3 px bumper gaps and
+    // keeping the complete chain inside the yard.
+    const indices=Array.from({length:count},(_,i)=>i);
+    for(let i=indices.length-1;i>0;i--){
+      const j=Math.floor(r()*(i+1));
+      [indices[i],indices[j]]=[indices[j],indices[i]];
+    }
+    for(const idx of indices){
+      const want=r()<.18?2:r()<.62?1:0;
+      const delta=[0,11,24][want];
+      if(want>0&&span+delta<=maxSpan){
+        kinds[idx]=want;
+        span+=delta;
       }
     }
-    if(trucks.length<count-2)continue;
+    laneKinds.push(kinds);
+    laneWidths.push(Math.max(...kinds.map(k=>[25,27,29][k])));
+  }
 
-    compactTruckLayout(trucks);
+  const totalHeight=laneWidths.reduce((a,b)=>a+b,0)+(lanes-1)*TRUCK_GAP;
+  let yCursor=JAM.y+(JAM.h-totalHeight)/2;
+  const trucks=[];
+  const laneOrders=[];
 
-    const baseOrder=removalOrder(trucks,R);
-    if(!baseOrder)continue;
+  for(let li=0;li<lanes;li++){
+    const kinds=laneKinds[li];
+    const widths=kinds.map(k=>[25,27,29][k]);
+    const lengths=kinds.map(k=>[48,59,72][k]);
+    const span=lengths.reduce((a,b)=>a+b,0)+(lengths.length-1)*TRUCK_GAP;
+    const spare=Math.max(0,maxSpan-span);
+    const shift=(r()-.5)*Math.min(18,spare);
+    let xCursor=JAM.x+JAM.w/2-span/2+shift;
 
-    const gen=finalizeCandidate(trucks,baseOrder,R,n);
+    const laneY=yCursor+laneWidths[li]/2;
+    yCursor+=laneWidths[li]+TRUCK_GAP;
+
+    const facingRight=((li+(r()<.32?1:0))%2===0);
+    const angle=facingRight?0:Math.PI;
+    const lane=[];
+
+    for(let i=0;i<kinds.length;i++){
+      const kind=kinds[i],length=lengths[i],width=widths[i];
+      const x=xCursor+length/2;
+      xCursor+=length+TRUCK_GAP;
+
+      const t={
+        id:`t${trucks.length}`,x,y:laneY,angle,
+        kind,length,width,capacity:[20,28,36][kind],color:'red'
+      };
+      trucks.push(t);
+      lane.push(t.id);
+    }
+
+    // The truck nearest the edge it faces is the only initially free vehicle
+    // in this chain. Each subsequent truck becomes free after the one ahead
+    // has gone.
+    laneOrders.push(facingRight?[...lane].reverse():lane);
+  }
+
+  // Interleave the chains so the intended solution repeatedly returns to
+  // different parts of the jam rather than clearing one whole row at a time.
+  const order=[];
+  let depth=0;
+  while(laneOrders.some(q=>q.length)){
+    const active=laneOrders.map((q,i)=>q.length?i:-1).filter(i=>i>=0);
+    if(active.length){
+      const rotate=(depth+Math.floor(r()*active.length))%active.length;
+      const sequence=[...active.slice(rotate),...active.slice(0,rotate)];
+      for(const li of sequence){
+        const id=laneOrders[li].shift();
+        if(id)order.push(id);
+      }
+    }
+    depth++;
+  }
+
+  return{trucks,order};
+}
+function generateLevel(n){
+  // Chain layouts are solver-safe by construction and give exact blocker
+  // depth: only the front of each tightly packed 3 px chain is initially free.
+  // Several seeded colour/sweet arrangements are tried so the strategic
+  // parking pressure varies from level to level.
+  for(let attempt=0;attempt<18;attempt++){
+    const R=rng(n*73471+attempt*977+19);
+    const built=buildChainLayout(n,R);
+    const gen=finalizeCandidate(built.trucks,built.order,R,n);
     if(gen)return gen;
   }
   return fallbackLevel(n);
