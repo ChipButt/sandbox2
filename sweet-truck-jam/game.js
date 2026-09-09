@@ -20,27 +20,23 @@ const overlayPrimary=document.getElementById('overlayPrimary');
 const overlaySecondary=document.getElementById('overlaySecondary');
 
 let dpr=1,scale=1,ox=0,oy=0,last=0,level=1,state=null,toastTimer=0;
-const ROTATION_CAPACITY=48;
+let candyPath=[];
+const ROTATION_CAPACITY=144;
 const ROTATION_COLS=4;
 const FEEDER_COLS=4;
-const ROTATION_SPEED_ROWS=.9;
+const ROTATION_SPEED_ROWS=4.0;
 const LOOP_ROWS=ROTATION_CAPACITY/ROTATION_COLS;
-if(LOOP_ROWS>12)throw new Error('Central rotation may not exceed 12 rows');
-const LEFT_JOIN_ROW=0;
-const RIGHT_JOIN_ROW=6;
-const OUTLET_ROW=9;
+if(LOOP_ROWS>36)throw new Error('Central rotation may not exceed 36 rows');
+const LEFT_JOIN_ROW=4;
+const RIGHT_JOIN_ROW=21;
+const OUTLET_ROW=13;
 const OUTLET_SOURCE_ROW=(OUTLET_ROW-1+LOOP_ROWS)%LOOP_ROWS;
 const LOAD_MOUTH={x:210,y:344};
-const SWEET_RADIUS=14;
-const CENTRAL_LANE_SPACING=29.0;
-const FEED_LANE_SPACING=29.0;
-const FEED_ROW_SPACING=32.0;
-const FEED_CORNER_RADIUS=58;
-const LOOP_CENTER={x:210,y:192};
-const LOOP_INNER_RADIUS=SWEET_RADIUS;
-const LOOP_ROW_RADIUS=72;
-const LOOP_OUTER_RADIUS=LOOP_ROW_RADIUS+((ROTATION_COLS-1)/2)*CENTRAL_LANE_SPACING+SWEET_RADIUS;
-const LOOP_START_ANGLE=Math.PI;
+const SWEET_RADIUS=7;
+const CENTRAL_LANE_SPACING=13.2;
+const FEED_LANE_SPACING=13.0;
+const FEED_ROW_SPACING=14.5;
+const FEED_CORNER_RADIUS=42;
 const pointer={x:0,y:0};
 
 function resize(){
@@ -66,20 +62,132 @@ function roundedRect(x,y,w,h,r,fill,stroke,line=1){
 }
 function text(s,x,y,size,fill='#fff',align='center',weight=900){ctx.fillStyle=fill;ctx.textAlign=align;ctx.textBaseline='middle';ctx.font=`${weight} ${size}px ui-rounded,system-ui,-apple-system`;ctx.fillText(s,x,y)}
 
+function makeCandyPath(){
+  // User-authored loop, with conveyor-style rounded motion through each
+  // vertex. The supplied vertices still define the layout; only a short
+  // tangent section around each corner is replaced by a smooth turn.
+  const vertices=[
+    {x:128.3,y:158.9},
+    {x:130,y:280},
+    {x:180,y:320},
+    {x:280,y:320},
+    {x:310,y:300},
+    {x:310,y:190},
+    {x:260,y:160},
+    {x:220,y:120},
+    {x:160,y:110}
+  ];
+
+  const cornerCut=22;
+  const n=vertices.length;
+  const corners=[];
+
+  function unit(a,b){
+    const dx=b.x-a.x,dy=b.y-a.y;
+    const d=Math.hypot(dx,dy)||1;
+    return{x:dx/d,y:dy/d,d};
+  }
+
+  for(let i=0;i<n;i++){
+    const prev=vertices[(i-1+n)%n];
+    const curr=vertices[i];
+    const next=vertices[(i+1)%n];
+
+    const incoming=unit(prev,curr);
+    const outgoing=unit(curr,next);
+
+    const cut=Math.min(
+      cornerCut,
+      incoming.d*.32,
+      outgoing.d*.32
+    );
+
+    corners.push({
+      vertex:curr,
+      enter:{
+        x:curr.x-incoming.x*cut,
+        y:curr.y-incoming.y*cut
+      },
+      exit:{
+        x:curr.x+outgoing.x*cut,
+        y:curr.y+outgoing.y*cut
+      }
+    });
+  }
+
+  const raw=[];
+
+  function addLine(a,b){
+    const len=Math.hypot(b.x-a.x,b.y-a.y);
+    const steps=Math.max(2,Math.ceil(len/2.5));
+    for(let i=0;i<steps;i++){
+      const t=i/steps;
+      raw.push({x:lerp(a.x,b.x,t),y:lerp(a.y,b.y,t)});
+    }
+  }
+
+  function addCorner(a,c,b){
+    const approx=Math.hypot(c.x-a.x,c.y-a.y)+Math.hypot(b.x-c.x,b.y-c.y);
+    const steps=Math.max(10,Math.ceil(approx/1.5));
+    for(let i=0;i<steps;i++){
+      const t=i/steps,q=1-t;
+      raw.push({
+        x:q*q*a.x+2*q*t*c.x+t*t*b.x,
+        y:q*q*a.y+2*q*t*c.y+t*t*b.y
+      });
+    }
+  }
+
+  for(let i=0;i<n;i++){
+    const current=corners[i];
+    const next=corners[(i+1)%n];
+
+    addCorner(current.enter,current.vertex,current.exit);
+    addLine(current.exit,next.enter);
+  }
+  raw.push({...raw[0]});
+
+  // Uniform arc-length resampling makes the belt speed physically constant
+  // through both straights and bends.
+  const cumulative=[0];
+  for(let i=1;i<raw.length;i++){
+    cumulative.push(cumulative[i-1]+Math.hypot(raw[i].x-raw[i-1].x,raw[i].y-raw[i-1].y));
+  }
+
+  const total=cumulative[cumulative.length-1];
+  const dense=[];
+  const sampleCount=540;
+  let cursor=1;
+
+  for(let i=0;i<sampleCount;i++){
+    const target=i/(sampleCount-1)*total;
+    while(cursor<cumulative.length-1&&cumulative[cursor]<target)cursor++;
+    const a=raw[cursor-1],b=raw[cursor];
+    const span=Math.max(.001,cumulative[cursor]-cumulative[cursor-1]);
+    const u=(target-cumulative[cursor-1])/span;
+    dense.push({x:lerp(a.x,b.x,u),y:lerp(a.y,b.y,u)});
+  }
+
+  return dense;
+}
+candyPath=makeCandyPath();
+
 function loopPose(row,phase=state?.rotationPhase||0){
   const rowProgress=((row+phase)%LOOP_ROWS+LOOP_ROWS)%LOOP_ROWS;
-  const angle=LOOP_START_ANGLE+(rowProgress/LOOP_ROWS)*Math.PI*2;
-  const ca=Math.cos(angle),sa=Math.sin(angle);
+  const exact=(rowProgress/LOOP_ROWS)*(candyPath.length-1);
+  const i0=Math.floor(exact),i1=(i0+1)%candyPath.length,t=exact-i0;
+  const p0=candyPath[i0]||candyPath[0],p1=candyPath[i1]||candyPath[0];
+  const x=lerp(p0.x,p1.x,t),y=lerp(p0.y,p1.y,t);
 
-  const x=LOOP_CENTER.x+LOOP_ROW_RADIUS*ca;
-  const y=LOOP_CENTER.y+LOOP_ROW_RADIUS*sa;
+  // Centred tangent = gradual row rotation through a bend instead of an
+  // instantaneous pivot when crossing a sample boundary.
+  const im1=(i0-2+candyPath.length)%candyPath.length;
+  const ip2=(i1+2)%candyPath.length;
+  const pa=candyPath[im1],pb=candyPath[ip2];
+  let tx=pb.x-pa.x,ty=pb.y-pa.y;
+  const len=Math.hypot(tx,ty)||1;tx/=len;ty/=len;
 
-  // Perfect circular motion. The row normal points toward the centre. With
-  // this radius the three outer lanes remain comfortably spaced while the
-  // innermost lane intentionally overlaps around the one-sweet centre hole.
-  const tx=-sa,ty=ca;
-  const nx=-ca,ny=-sa;
-  return{x,y,tx,ty,nx,ny};
+  return{x,y,tx,ty,nx:-ty,ny:tx};
 }
 function candyPos(index,phase=state?.rotationPhase||0){
   const row=Math.floor(index/ROTATION_COLS),col=index%ROTATION_COLS,p=loopPose(row,phase);
@@ -88,23 +196,44 @@ function candyPos(index,phase=state?.rotationPhase||0){
 }
 function feederGeometry(side){
   const join=loopPose(side==='left'?LEFT_JOIN_ROW:RIGHT_JOIN_ROW,0);
-  const mouth={
-    x:LOOP_CENTER.x+(side==='left'?-LOOP_OUTER_RADIUS:LOOP_OUTER_RADIUS),
-    y:LOOP_CENTER.y
-  };
-  return{join,mouth};
+  const outerX=side==='left'?6:414;
+  const radius=FEED_CORNER_RADIUS;
+  const mouth={x:side==='left'?join.x-43:join.x+43,y:join.y};
+  return{join,outerX,radius,mouth};
 }
 function feederRowPose(side,rowVisual){
   const g=feederGeometry(side);
   const d=Math.max(0,rowVisual*FEED_ROW_SPACING);
-  return{
-    x:side==='left'?g.mouth.x-d:g.mouth.x+d,
-    y:g.mouth.y,
-    tx:side==='left'?1:-1,
-    ty:0,
-    nx:0,
-    ny:1
-  };
+  const R=g.radius;
+  const tangentX=side==='left'?g.outerX+R:g.outerX-R;
+  const horizontal=Math.max(0,side==='left'?g.mouth.x-tangentX:tangentX-g.mouth.x);
+  const arc=R*Math.PI/2;
+
+  if(d<=horizontal){
+    return{
+      x:side==='left'?g.mouth.x-d:g.mouth.x+d,
+      y:g.mouth.y,
+      tx:side==='left'?1:-1,ty:0,
+      nx:0,ny:side==='left'?1:-1
+    };
+  }
+
+  const q=d-horizontal;
+  if(q<=arc){
+    if(side==='left'){
+      const phi=Math.PI/2+q/R;
+      const cx=g.outerX+R,cy=g.mouth.y-R;
+      const tx=Math.sin(phi),ty=-Math.cos(phi);
+      return{x:cx+R*Math.cos(phi),y:cy+R*Math.sin(phi),tx,ty,nx:-ty,ny:tx};
+    }
+    const phi=Math.PI/2-q/R;
+    const cx=g.outerX-R,cy=g.mouth.y-R;
+    const tx=-Math.sin(phi),ty=Math.cos(phi);
+    return{x:cx+R*Math.cos(phi),y:cy+R*Math.sin(phi),tx,ty,nx:-ty,ny:tx};
+  }
+
+  const vertical=q-arc;
+  return{x:g.outerX,y:g.mouth.y-R-vertical,tx:0,ty:1,nx:-1,ny:0};
 }
 function feederRowPos(side,rowVisual,col){
   const p=feederRowPose(side,rowVisual);
@@ -123,8 +252,8 @@ function cubicPose(p0,p1,p2,p3,u){
 function feederEntryPoint(side,col,u,targetIndex){
   const start=feederRowPose(side,0);
   const target=loopPose(Math.floor(targetIndex/ROTATION_COLS),state.rotationPhase);
-  const c1={x:start.x+start.tx*48,y:start.y+start.ty*48};
-  const c2={x:target.x-target.tx*48,y:target.y-target.ty*48};
+  const c1={x:start.x+start.tx*28,y:start.y+start.ty*28};
+  const c2={x:target.x-target.tx*30,y:target.y-target.ty*30};
   const p=cubicPose(
     {x:start.x,y:start.y},c1,c2,{x:target.x,y:target.y},u
   );
@@ -270,22 +399,54 @@ function blockingTruckIds(t,trucks){
   return[...ids];
 }
 function removalOrder(trucks,r){
-  const rem=trucks.map(t=>({...t})),out=[];
-  while(rem.length){
-    const free=rem.filter(t=>canDriveOut(t,rem));
-    if(!free.length)return null;
-    const t=choice(r,free);
-    out.push(t.id);
-    rem.splice(rem.findIndex(x=>x.id===t.id),1);
+  const n=trucks.length;
+  if(n===0)return[];
+  if(n>30)return null;
+
+  const fullMask=(1<<n)-1;
+  const dead=new Set();
+  let nodes=0;
+  const nodeLimit=9000;
+
+  function members(mask){
+    const out=[];
+    for(let i=0;i<n;i++)if(mask&(1<<i))out.push(trucks[i]);
+    return out;
   }
-  return out;
+  function solve(mask){
+    if(mask===0)return[];
+    if(dead.has(mask)||nodes++>nodeLimit)return null;
+
+    const rem=members(mask),free=[];
+    for(let i=0;i<n;i++){
+      if(!(mask&(1<<i)))continue;
+      if(canDriveOut(trucks[i],rem))free.push(i);
+    }
+    if(!free.length){dead.add(mask);return null}
+
+    // Vary equivalent solutions by seed, but backtrack if a choice later jams.
+    for(let i=free.length-1;i>0;i--){
+      const j=Math.floor(r()*(i+1));
+      [free[i],free[j]]=[free[j],free[i]];
+    }
+
+    for(const i of free){
+      const rest=solve(mask&~(1<<i));
+      if(rest)return[trucks[i].id,...rest];
+    }
+
+    dead.add(mask);
+    return null;
+  }
+
+  return solve(fullMask);
 }
 function difficultyProfile(n){
-  if(n<=2)return{maxFree:8,garageChance:0,hiddenChance:0,shuffleMoves:1};
-  if(n<=4)return{maxFree:8,garageChance:.22,hiddenChance:.25,shuffleMoves:2};
-  if(n<=7)return{maxFree:8,garageChance:.55,hiddenChance:.48,shuffleMoves:3};
-  if(n<=12)return{maxFree:8,garageChance:.68,hiddenChance:.58,shuffleMoves:4};
-  return{maxFree:8,garageChance:.76,hiddenChance:.68,shuffleMoves:5};
+  if(n<=2)return{maxFree:5,garageChance:0,hiddenChance:0,shuffleMoves:1};
+  if(n<=4)return{maxFree:5,garageChance:.22,hiddenChance:.25,shuffleMoves:2};
+  if(n<=7)return{maxFree:4,garageChance:.55,hiddenChance:.48,shuffleMoves:3};
+  if(n<=12)return{maxFree:4,garageChance:.68,hiddenChance:.58,shuffleMoves:4};
+  return{maxFree:4,garageChance:.76,hiddenChance:.68,shuffleMoves:5};
 }
 function allGeneratedTrucks(gen){return gen.garage?[...gen.trucks,...gen.garage.queue]:[...gen.trucks]}
 function addUndergroundGarage(gen,r,n){
@@ -392,24 +553,39 @@ function validateGeneratedLevel(gen){
 }
 function buildRandomCluster(n,R,relaxed=false){
   const count=Math.min((relaxed?15:17)+Math.floor(n*.35),22),trucks=[];
+  const cx=JAM.x+JAM.w/2,cy=JAM.y+JAM.h/2;
+
   for(let i=0;i<count;i++){
     let placed=false;
     for(let k=0;k<450&&!placed;k++){
       const kind=R()<.18?2:R()<.55?1:0;
       const length=[48,59,72][kind],width=[25,27,29][kind];
-      const angle=choice(R,[0,Math.PI/4,Math.PI/2,3*Math.PI/4,Math.PI,5*Math.PI/4,3*Math.PI/2,7*Math.PI/4]);
-      const t={
-        id:`t${i}`,
-        x:rint(R,JAM.x+34,JAM.x+JAM.w-34),
-        y:rint(R,JAM.y+34,JAM.y+JAM.h-34),
-        angle,length,width,capacity:[20,28,36][kind],kind,color:'red'
-      };
+      const x=rint(R,JAM.x+34,JAM.x+JAM.w-34);
+      const y=rint(R,JAM.y+34,JAM.y+JAM.h-34);
+
+      // Head generally away from the cluster centre so the pile remains
+      // solvable. Harder levels introduce more sideways/inward deviations,
+      // creating blockers without turning the layout into artificial rows.
+      const unit=Math.PI/4;
+      const outward=Math.round(Math.atan2(y-cy,x-cx)/unit)*unit;
+      const roll=R();
+      let twist=0;
+      const straightChance=n<=2?.78:n<=7?.58:.48;
+      const sideChance=n<=2?.18:n<=7?.28:.32;
+      if(roll>straightChance){
+        const sign=R()<.5?-1:1;
+        twist=roll<straightChance+sideChance?sign:sign*2;
+      }
+      const angle=outward+twist*unit;
+
+      const t={id:`t${i}`,x,y,angle,length,width,capacity:[20,28,36][kind],kind,color:'red'};
       const poly=truckPoly(t);
       if(poly.some(p=>p.x<JAM.x+4||p.x>JAM.x+JAM.w-4||p.y<JAM.y+4||p.y>JAM.y+JAM.h-4))continue;
       if(trucks.some(o=>polyOverlap(poly,truckPoly(o))))continue;
       trucks.push(t);placed=true;
     }
   }
+
   if(trucks.length<count-2)return null;
   compactTruckLayout(trucks);
   return trucks;
@@ -423,30 +599,21 @@ function finishGeneratedCluster(trucks,order,R,n){
   applyHiddenTruckColours(gen,R,n);return validateGeneratedLevel(gen)?gen:null;
 }
 function generateLevel(n){
-  for(let attempt=0;attempt<220;attempt++){
-    const R=rng(n*73471+attempt*977+19);
-    const trucks=buildRandomCluster(n,R,false);
-    if(!trucks)continue;
-    const clear=initialClearCount(trucks);
-    if(clear<2||clear>Math.max(7,trucks.length*.68))continue;
-    const order=removalOrder(trucks,R);
-    if(!order)continue;
-    const gen=finishGeneratedCluster(trucks,order,R,n);
-    if(gen)return gen;
+  const profile=difficultyProfile(n);
+  for(let attempt=0;attempt<18;attempt++){
+    const R=rng(n*73471+attempt*977+19),trucks=buildRandomCluster(n,R,false);if(!trucks)continue;
+    const clear=initialClearCount(trucks);if(clear<2||clear>profile.maxFree)continue;
+    const order=removalOrder(trucks,R);if(!order)continue;
+    const gen=finishGeneratedCluster(trucks,order,R,n);if(gen)return gen;
   }
   return fallbackLevel(n);
 }
 function fallbackLevel(n){
-  for(let attempt=0;attempt<700;attempt++){
-    const R=rng(n*191+attempt*1297+401);
-    const trucks=buildRandomCluster(n,R,true);
-    if(!trucks)continue;
-    const clear=initialClearCount(trucks);
-    if(clear<2||clear>Math.max(8,trucks.length*.75))continue;
-    const order=removalOrder(trucks,R);
-    if(!order)continue;
-    const gen=finishGeneratedCluster(trucks,order,R,n);
-    if(gen)return gen;
+  for(let attempt=0;attempt<60;attempt++){
+    const R=rng(n*191+attempt*1297+401),trucks=buildRandomCluster(n,R,true);if(!trucks)continue;
+    const clear=initialClearCount(trucks);if(clear<2||clear>7)continue;
+    const order=removalOrder(trucks,R);if(!order)continue;
+    const gen=finishGeneratedCluster(trucks,order,R,n);if(gen)return gen;
   }
   throw new Error('Unable to generate clustered level');
 }
@@ -530,7 +697,7 @@ function processFeederJunctions(){
 function start(n){
   level=n;state=newState(n);
   if(!loopRowsAreValid(state.rotation)||!rowsAreValid(state.leftFeed)||!rowsAreValid(state.rightFeed))throw new Error('Level started with an invalid sweet row');
-  if(state.rotation.length!==48)throw new Error('Central loop must contain exactly 12 row slots');
+  if(state.rotation.length!==144)throw new Error('Central loop must contain exactly 36 row slots');
   overlay.classList.add('hidden');saveLevel();showToast('Tap a truck with a clear path');
 }
 function saveLevel(){try{localStorage.setItem('sweet-fever-level',String(level))}catch(_){}}
@@ -547,48 +714,45 @@ function drawCrowdTrack(){
   ctx.save();
   ctx.lineJoin='round';
 
-  // Top-up tubes now enter only from the left and right edges of the screen.
-  // There is no visible vertical run or external elbow.
+  // Draw feeder tubes first so the central loop masks the connector overlap.
+  // Use butt caps so the feeder endpoint itself cannot create a rounded bulb.
   ctx.lineCap='butt';
   for(const side of ['left','right']){
     const g=feederGeometry(side);
-    const startX=side==='left'?-120:W+120;
+    const R=g.radius;
+    const tangentX=side==='left'?g.outerX+R:g.outerX-R;
+    const target=loopPose(side==='left'?LEFT_JOIN_ROW:RIGHT_JOIN_ROW,0);
+    const c1={x:g.mouth.x+(side==='left'?28:-28),y:g.mouth.y};
+    const c2={x:target.x-target.tx*30,y:target.y-target.ty*30};
 
     for(const stroke of [
-      {w:124,c:'#aebbc4'},
-      {w:118,c:'#f7fafc'},
-      {w:112,c:'#d6e0e6'}
+      {w:68,c:'#aebbc4'},
+      {w:62,c:'#f7fafc'},
+      {w:56,c:'#d6e0e6'}
     ]){
       ctx.beginPath();
-      ctx.moveTo(startX,g.mouth.y);
+      ctx.moveTo(g.outerX,-100);
+      ctx.lineTo(g.outerX,g.mouth.y-R);
+      ctx.quadraticCurveTo(g.outerX,g.mouth.y,tangentX,g.mouth.y);
       ctx.lineTo(g.mouth.x,g.mouth.y);
-      ctx.strokeStyle=stroke.c;
-      ctx.lineWidth=stroke.w;
-      ctx.stroke();
+      ctx.bezierCurveTo(c1.x,c1.y,c2.x,c2.y,target.x,target.y);
+      ctx.strokeStyle=stroke.c;ctx.lineWidth=stroke.w;ctx.stroke();
     }
   }
 
-  // True circular hoop. The clear centre is exactly one sweet diameter:
-  // inner radius = SWEET_RADIUS = 14 px, so the hole is 28 px across.
-  function fillHoop(outerR,innerR,fill){
+  // Draw the central loop over the feeder endpoints. This leaves only the
+  // intended opening/connection visible and removes the overlapping bulb.
+  ctx.lineCap='round';
+  for(const stroke of [
+    {w:72,c:'#aebbc4'},
+    {w:66,c:'#f7fafc'},
+    {w:60,c:'#d6e0e6'}
+  ]){
     ctx.beginPath();
-    ctx.arc(LOOP_CENTER.x,LOOP_CENTER.y,outerR,0,Math.PI*2);
-    ctx.arc(LOOP_CENTER.x,LOOP_CENTER.y,innerR,0,Math.PI*2,true);
-    ctx.fillStyle=fill;
-    ctx.fill('evenodd');
+    candyPath.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+    ctx.closePath();
+    ctx.strokeStyle=stroke.c;ctx.lineWidth=stroke.w;ctx.stroke();
   }
-
-  fillHoop(LOOP_OUTER_RADIUS+6,LOOP_INNER_RADIUS,'#aebbc4');
-  fillHoop(LOOP_OUTER_RADIUS+3,LOOP_INNER_RADIUS,'#f7fafc');
-  fillHoop(LOOP_OUTER_RADIUS,LOOP_INNER_RADIUS,'#d6e0e6');
-
-  // Inner rim sits outside the clear radius, so it does not reduce the
-  // one-sweet-sized opening.
-  ctx.beginPath();
-  ctx.arc(LOOP_CENTER.x,LOOP_CENTER.y,LOOP_INNER_RADIUS+1.5,0,Math.PI*2);
-  ctx.strokeStyle='#aebbc4';
-  ctx.lineWidth=3;
-  ctx.stroke();
 
   const outlet=loopPose(OUTLET_ROW,0);
   for(const stroke of [
@@ -635,76 +799,15 @@ function drawBoosters(){
 }
 
 function drawCandy(c,index){
-  const p=candyPos(c.visualIndex);
-  drawSweetAt(p,c.color,SWEET_RADIUS);
+  const p=candyPos(c.visualIndex);const col=COLORS[c.color];
+  ctx.save();ctx.translate(p.x,p.y);ctx.beginPath();ctx.arc(1.5,2.3,5.3,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.18)';ctx.fill();ctx.beginPath();ctx.arc(0,0,5.2,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();
+  ctx.beginPath();ctx.arc(-1.7,-1.8,1.6,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.45)';ctx.fill();ctx.restore();
 }
 function drawSweetAt(p,color,r=SWEET_RADIUS){
-  const base=COLORS[color]||'#999';
-
-  ctx.save();
-  ctx.translate(p.x,p.y);
-
-  // Soft contact shadow gives the sphere some separation from the conveyor.
-  ctx.beginPath();
-  ctx.ellipse(r*.16,r*.58,r*.86,r*.38,0,0,Math.PI*2);
-  ctx.fillStyle='rgba(0,0,0,.20)';
-  ctx.fill();
-
-  // Main 3D sphere. The bright radial origin is offset to the upper-left,
-  // falling through the base colour into a darker lower-right edge.
-  const sphere=ctx.createRadialGradient(
-    -r*.38,-r*.42,r*.05,
-    r*.10,r*.12,r*1.16
-  );
-  sphere.addColorStop(0,'rgba(255,255,255,.98)');
-  sphere.addColorStop(.12,shade(base,.34));
-  sphere.addColorStop(.38,shade(base,.12));
-  sphere.addColorStop(.63,base);
-  sphere.addColorStop(.84,shade(base,-.17));
-  sphere.addColorStop(1,shade(base,-.34));
-
-  ctx.beginPath();
-  ctx.arc(0,0,r,0,Math.PI*2);
-  ctx.fillStyle=sphere;
-  ctx.fill();
-
-  // Lower hemisphere shading strengthens the spherical volume.
-  const lower=ctx.createLinearGradient(0,-r*.15,0,r);
-  lower.addColorStop(0,'rgba(0,0,0,0)');
-  lower.addColorStop(.58,'rgba(0,0,0,.02)');
-  lower.addColorStop(1,'rgba(0,0,0,.20)');
-  ctx.beginPath();
-  ctx.arc(0,0,r*.96,0,Math.PI*2);
-  ctx.fillStyle=lower;
-  ctx.fill();
-
-  // Broad glossy reflection.
-  const gloss=ctx.createRadialGradient(
-    -r*.34,-r*.38,0,
-    -r*.28,-r*.30,r*.54
-  );
-  gloss.addColorStop(0,'rgba(255,255,255,.92)');
-  gloss.addColorStop(.30,'rgba(255,255,255,.55)');
-  gloss.addColorStop(.72,'rgba(255,255,255,.12)');
-  gloss.addColorStop(1,'rgba(255,255,255,0)');
-  ctx.beginPath();
-  ctx.arc(-r*.20,-r*.24,r*.50,0,Math.PI*2);
-  ctx.fillStyle=gloss;
-  ctx.fill();
-
-  // Small hard specular highlight.
-  ctx.beginPath();
-  ctx.arc(-r*.42,-r*.46,r*.105,0,Math.PI*2);
-  ctx.fillStyle='rgba(255,255,255,.96)';
-  ctx.fill();
-
-  // Fine dark rim at the lower edge to stop pale colours looking flat.
-  ctx.beginPath();
-  ctx.arc(0,0,r-.45,.10*Math.PI,.90*Math.PI);
-  ctx.strokeStyle='rgba(0,0,0,.15)';
-  ctx.lineWidth=Math.max(1,r*.08);
-  ctx.stroke();
-
+  ctx.save();ctx.translate(p.x,p.y);
+  ctx.beginPath();ctx.arc(1.9,2.8,r+.15,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,.17)';ctx.fill();
+  ctx.beginPath();ctx.arc(0,0,r,0,Math.PI*2);ctx.fillStyle=COLORS[color];ctx.fill();
+  ctx.beginPath();ctx.arc(-2.2,-2.3,2.0,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.43)';ctx.fill();
   ctx.restore();
 }
 function drawFeederRows(feed,side,dt){
@@ -943,20 +1046,19 @@ function motionPose(m){
 function drawParticles(){
   for(const p of state.particles){
     const local=p.t-(p.delay||0);
-
     if(local<0){
-      drawSweetAt({x:p.sx,y:p.sy},p.color,SWEET_RADIUS);
+      ctx.beginPath();ctx.arc(p.sx,p.sy,SWEET_RADIUS,0,Math.PI*2);ctx.fillStyle=COLORS[p.color];ctx.fill();
+      ctx.beginPath();ctx.arc(p.sx-2.2,p.sy-2.2,2,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.48)';ctx.fill();
       continue;
     }
-
     const raw=clamp(local/p.duration,0,1),u=ease(raw),q=1-u;
     const c1x=p.c1x??p.cx??p.sx,c1y=p.c1y??p.cy??p.sy;
     const c2x=p.c2x??p.cx??p.tx,c2y=p.c2y??p.cy??p.ty;
     const x=q*q*q*p.sx+3*q*q*u*c1x+3*q*u*u*c2x+u*u*u*p.tx;
     const y=q*q*q*p.sy+3*q*q*u*c1y+3*q*u*u*c2y+u*u*u*p.ty;
-
     ctx.globalAlpha=1-raw*.12;
-    drawSweetAt({x,y},p.color,SWEET_RADIUS*(1-raw*.06));
+    ctx.beginPath();ctx.arc(x,y,SWEET_RADIUS*(1-raw*.06),0,Math.PI*2);ctx.fillStyle=COLORS[p.color];ctx.fill();
+    ctx.beginPath();ctx.arc(x-2.2,y-2.2,2,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.48)';ctx.fill();
     ctx.globalAlpha=1;
   }
 }
