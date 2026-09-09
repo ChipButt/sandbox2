@@ -92,7 +92,7 @@ textarea{width:100%;height:130px;margin-top:9px;border:1px solid #b8c5d0;border-
   const out=document.getElementById('out');
 
   const basePoints=[
-    [93.3,113],[100,260],[140,300],[300,300],[340,260],[340,180],[300.1,101.8],[237,102.2],[164.9,66.4]
+    [128.3,158.9],[130,280],[180,320],[280,320],[310,300],[310,190],[260,160],[220,120],[160,110]
   ];
   const baseRadii=[22,22,22,22,22,22,22,22,22];
 
@@ -236,7 +236,7 @@ textarea{width:100%;height:130px;margin-top:9px;border:1px solid #b8c5d0;border-
       cornerRadii:radii.map(v=>+v.toFixed(1))
     };
     out.value=JSON.stringify(payload);
-    localStorage.setItem('sweet-loop-editor-v3',out.value);
+    localStorage.setItem('sweet-loop-editor-v4',out.value);
     return out.value;
   }
 
@@ -277,7 +277,7 @@ textarea{width:100%;height:130px;margin-top:9px;border:1px solid #b8c5d0;border-
   copyBtn.onclick=copy;
   finishBtn.onclick=async()=>{await copy();finishBtn.textContent='Copied — paste into ChatGPT';setTimeout(()=>finishBtn.textContent='Finish + Copy',1700)};
 
-  const saved=localStorage.getItem('sweet-loop-editor-v3');
+  const saved=localStorage.getItem('sweet-loop-editor-v4');
   if(saved){
     try{
       const v=JSON.parse(saved);
