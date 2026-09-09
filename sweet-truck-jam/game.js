@@ -301,7 +301,7 @@ function truckPositionLegal(t,x,y,trucks){
   }
   return true;
 }
-function tryCompactStep(t,dx,dy,trucks,step=2.25){
+function tryCompactStep(t,dx,dy,trucks,step=2.25,precise=false){
   const len=Math.hypot(dx,dy);
   if(len<.001)return false;
   const nx=dx/len,ny=dy/len;
@@ -313,18 +313,19 @@ function tryCompactStep(t,dx,dy,trucks,step=2.25){
     return true;
   }
 
-  // If the requested step would cross the clearance boundary, binary
-  // search the remaining distance so the truck settles right up to that
-  // boundary instead of stopping a whole compaction step away.
+  // Coarse settling stops at the first blocked full step. Only the final pass
+  // spends extra work resolving the exact 3 px clearance boundary.
+  if(!precise)return false;
+
   let lo=0,hi=step;
-  for(let i=0;i<12;i++){
+  for(let i=0;i<8;i++){
     const mid=(lo+hi)/2;
     const x=ox+nx*mid,y=oy+ny*mid;
     if(truckPositionLegal(t,x,y,trucks))lo=mid;
     else hi=mid;
   }
 
-  if(lo<=.015)return false;
+  if(lo<=.02)return false;
   t.x=ox+nx*lo;
   t.y=oy+ny*lo;
   return true;
@@ -336,7 +337,7 @@ function compactTruckLayout(trucks){
   // the direct inward movement first, then the axis components and nearest
   // neighbour direction so a truck can use otherwise wasted pockets.
   let still=0;
-  for(let pass=0;pass<85&&still<6;pass++){
+  for(let pass=0;pass<62&&still<5;pass++){
     let moved=0;
     const cx=trucks.reduce((a,t)=>a+t.x,0)/trucks.length;
     const cy=trucks.reduce((a,t)=>a+t.y,0)/trucks.length;
@@ -378,16 +379,16 @@ function compactTruckLayout(trucks){
 
   // A final fine-grain settling pass closes sub-pixel-looking gaps left by the
   // coarse compaction above.
-  for(let pass=0;pass<22;pass++){
+  for(let pass=0;pass<16;pass++){
     let moved=0;
     const cx=trucks.reduce((a,t)=>a+t.x,0)/trucks.length;
     const cy=trucks.reduce((a,t)=>a+t.y,0)/trucks.length;
     for(const t of trucks){
       const dx=cx-t.x,dy=cy-t.y;
-      if(tryCompactStep(t,dx,dy,trucks,.65))moved++;
+      if(tryCompactStep(t,dx,dy,trucks,.65,true))moved++;
       else{
-        if(Math.abs(dx)>.2&&tryCompactStep(t,Math.sign(dx),0,trucks,.5))moved++;
-        else if(Math.abs(dy)>.2&&tryCompactStep(t,0,Math.sign(dy),trucks,.5))moved++;
+        if(Math.abs(dx)>.2&&tryCompactStep(t,Math.sign(dx),0,trucks,.5,true))moved++;
+        else if(Math.abs(dy)>.2&&tryCompactStep(t,0,Math.sign(dy),trucks,.5,true))moved++;
       }
     }
     if(!moved)break;
