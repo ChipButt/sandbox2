@@ -27,9 +27,9 @@ const FEEDER_COLS=4;
 const ROTATION_SPEED_ROWS=4.0;
 const LOOP_ROWS=ROTATION_CAPACITY/ROTATION_COLS;
 if(LOOP_ROWS>36)throw new Error('Central rotation may not exceed 36 rows');
-const LEFT_JOIN_ROW=16;
-const RIGHT_JOIN_ROW=0;
-const OUTLET_ROW=8;
+const LEFT_JOIN_ROW=4;
+const RIGHT_JOIN_ROW=21;
+const OUTLET_ROW=13;
 const OUTLET_SOURCE_ROW=(OUTLET_ROW-1+LOOP_ROWS)%LOOP_ROWS;
 const LOAD_MOUTH={x:210,y:344};
 const SWEET_RADIUS=7;
@@ -63,46 +63,34 @@ function roundedRect(x,y,w,h,r,fill,stroke,line=1){
 function text(s,x,y,size,fill='#fff',align='center',weight=900){ctx.fillStyle=fill;ctx.textAlign=align;ctx.textBaseline='middle';ctx.font=`${weight} ${size}px ui-rounded,system-ui,-apple-system`;ctx.fillText(s,x,y)}
 
 function makeCandyPath(){
-  // Same overall green-line layout, rebuilt as deliberate geometry:
-  // true straights joined by controlled-radius corners instead of a globally
-  // smoothed hand-drawn outline.
+  // User-authored central loop from the shape editor.
+  // Keep the supplied vertices exactly; only resample each straight segment
+  // uniformly so the rows travel at a constant physical speed.
+  const vertices=[
+    {x:100,y:90},
+    {x:100,y:260},
+    {x:140,y:300},
+    {x:300,y:300},
+    {x:340,y:260},
+    {x:340,y:180},
+    {x:270,y:110},
+    {x:270,y:80},
+    {x:110,y:80}
+  ];
+
   const raw=[];
+  const closed=[...vertices,{...vertices[0]}];
 
-  function addLine(a,b,steps=28){
-    for(let i=0;i<steps;i++){
-      const t=i/steps;
-      raw.push({x:lerp(a[0],b[0],t),y:lerp(a[1],b[1],t)});
+  for(let i=1;i<closed.length;i++){
+    const a=closed[i-1],b=closed[i];
+    const length=Math.hypot(b.x-a.x,b.y-a.y);
+    const steps=Math.max(2,Math.ceil(length/3));
+    for(let j=0;j<steps;j++){
+      const t=j/steps;
+      raw.push({x:lerp(a.x,b.x,t),y:lerp(a.y,b.y,t)});
     }
   }
-
-  function addCubic(a,c1,c2,b,steps=40){
-    for(let i=0;i<steps;i++){
-      const t=i/steps,q=1-t;
-      raw.push({
-        x:q*q*q*a[0]+3*q*q*t*c1[0]+3*q*t*t*c2[0]+t*t*t*b[0],
-        y:q*q*q*a[1]+3*q*q*t*c1[1]+3*q*t*t*c2[1]+t*t*t*b[1]
-      });
-    }
-  }
-
-  addCubic([315,204],[317,220],[317,238],[313,250]);
-  addCubic([313,250],[305,278],[282,297],[255,305]);
-
-  addLine([255,305],[145,305]);
-
-  addCubic([145,305],[127,305],[112,290],[112,272]);
-  addLine([112,272],[112,160]);
-
-  addCubic([112,160],[112,132],[138,108],[170,100]);
-  addLine([170,100],[212,100]);
-
-  addCubic([212,100],[230,100],[241,110],[245,126]);
-  addLine([245,126],[247,165]);
-  addCubic([247,165],[247,179],[254,185],[268,187]);
-  addLine([268,187],[298,187]);
-
-  addCubic([298,187],[307,187],[313,194],[315,204]);
-  raw.push({...raw[0]});
+  raw.push({...vertices[0]});
 
   const cumulative=[0];
   for(let i=1;i<raw.length;i++){
