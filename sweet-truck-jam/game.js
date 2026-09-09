@@ -67,15 +67,15 @@ function makeCandyPath(){
   // vertex. The supplied vertices still define the layout; only a short
   // tangent section around each corner is replaced by a smooth turn.
   const vertices=[
-    {x:93.3,y:113},
-    {x:100,y:260},
-    {x:140,y:300},
-    {x:300,y:300},
-    {x:340,y:260},
-    {x:340,y:180},
-    {x:300.1,y:101.8},
-    {x:237,y:102.2},
-    {x:164.9,y:66.4}
+    {x:128.3,y:158.9},
+    {x:130,y:280},
+    {x:180,y:320},
+    {x:280,y:320},
+    {x:310,y:300},
+    {x:310,y:190},
+    {x:260,y:160},
+    {x:220,y:120},
+    {x:160,y:110}
   ];
 
   const cornerCut=22;
