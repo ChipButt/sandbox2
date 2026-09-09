@@ -740,32 +740,25 @@ function buildOrganicCluster(n,r,relaxed=false){
   const count=Math.min((relaxed?14:16)+Math.floor(n*.4),22);
   const trucks=[];
 
-  const cx=JAM.x+JAM.w/2+(r()-.5)*24;
-  const cy=JAM.y+JAM.h/2+(r()-.5)*18;
-  const rx=JAM.w*(relaxed?.39:.36);
-  const ry=JAM.h*(relaxed?.39:.35);
-
   for(let i=0;i<count;i++){
     let placed=false;
-    for(let k=0;k<900&&!placed;k++){
+    for(let k=0;k<520&&!placed;k++){
       const kind=r()<.18?2:r()<.55?1:0;
       const length=[48,59,72][kind],width=[25,27,29][kind];
       const angle=choice(r,[0,Math.PI/4,Math.PI/2,3*Math.PI/4,Math.PI,5*Math.PI/4,3*Math.PI/2,7*Math.PI/4]);
 
-      // Centre-biased sampling creates the irregular pile before compaction,
-      // rather than laying vehicles onto rows or a hidden grid.
-      const ux=((r()+r())/2-.5)*2;
-      const uy=((r()+r())/2-.5)*2;
+      // Start with an irregular scatter. The compactor then pulls the whole
+      // layout into one dense 3 px-gap blob without introducing rows or a grid.
       const t={
         id:`t${i}`,
-        x:cx+ux*rx,
-        y:cy+uy*ry,
+        x:rint(r,JAM.x+34,JAM.x+JAM.w-34),
+        y:rint(r,JAM.y+34,JAM.y+JAM.h-34),
         angle,kind,length,width,
         capacity:[20,28,36][kind],
         color:'red'
       };
 
-      if(!truckFullyInsideJam(t,t.x,t.y,6))continue;
+      if(!truckFullyInsideJam(t,t.x,t.y,4))continue;
       if(trucks.some(o=>polyOverlap(truckPoly(t),truckPoly(o))))continue;
 
       trucks.push(t);
@@ -777,8 +770,8 @@ function buildOrganicCluster(n,r,relaxed=false){
 
   compactTruckLayout(trucks);
 
-  // Reject line-like outcomes even if they are mechanically valid.
-  if(clusterShapeQuality(trucks)<(relaxed?.095:.13))return null;
+  // Reject only genuinely line-like outcomes; normal irregular clusters pass.
+  if(clusterShapeQuality(trucks)<(relaxed?.06:.085))return null;
 
   return trucks;
 }
@@ -786,7 +779,7 @@ function generateLevel(n){
   // Levels are always built as a dense, irregular two-dimensional cluster.
   // Difficulty comes from blockers, parking pressure, hidden colours and the
   // underground garage — never from arranging trucks into artificial lines.
-  for(let attempt=0;attempt<360;attempt++){
+  for(let attempt=0;attempt<280;attempt++){
     const R=rng(n*73471+attempt*977+19);
     const trucks=buildOrganicCluster(n,R,false);
     if(!trucks)continue;
@@ -803,7 +796,7 @@ function fallbackLevel(n){
   // Safety fallback uses the same organic-cluster generator with only the
   // numeric difficulty threshold relaxed. It is never allowed to become rows,
   // columns or a sparse two-lane arrangement.
-  for(let attempt=0;attempt<1200;attempt++){
+  for(let attempt=0;attempt<420;attempt++){
     const R=rng(n*191+attempt*1297+401);
     const trucks=buildOrganicCluster(n,R,true);
     if(!trucks)continue;
