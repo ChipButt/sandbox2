@@ -336,7 +336,7 @@ function compactTruckLayout(trucks){
   // the direct inward movement first, then the axis components and nearest
   // neighbour direction so a truck can use otherwise wasted pockets.
   let still=0;
-  for(let pass=0;pass<180&&still<8;pass++){
+  for(let pass=0;pass<85&&still<6;pass++){
     let moved=0;
     const cx=trucks.reduce((a,t)=>a+t.x,0)/trucks.length;
     const cy=trucks.reduce((a,t)=>a+t.y,0)/trucks.length;
@@ -378,7 +378,7 @@ function compactTruckLayout(trucks){
 
   // A final fine-grain settling pass closes sub-pixel-looking gaps left by the
   // coarse compaction above.
-  for(let pass=0;pass<40;pass++){
+  for(let pass=0;pass<22;pass++){
     let moved=0;
     const cx=trucks.reduce((a,t)=>a+t.x,0)/trucks.length;
     const cy=trucks.reduce((a,t)=>a+t.y,0)/trucks.length;
@@ -779,61 +779,66 @@ function buildOrganicCluster(n,r,relaxed=false){
 
   return trucks;
 }
-function generateLevel(n){
-  // Levels are always built as a dense, irregular two-dimensional cluster.
-  // Difficulty comes from blockers, parking pressure, hidden colours and the
-  // underground garage — never from arranging trucks into artificial lines.
-  for(let attempt=0;attempt<90;attempt++){
-    const R=rng(n*73471+attempt*977+19);
-    const trucks=buildOrganicCluster(n,R,false);
-    if(!trucks)continue;
+function scoreClusterGeometry(trucks){
+  const free=initialClearCount(trucks);
+  let multi=0,maxBlock=0,totalBlock=0;
 
-    const order=removalOrder(trucks,R);
-    if(!order)continue;
-
-    const gen=finalizeCandidate(trucks,order,R,n,false);
-    if(gen)return gen;
+  for(const t of trucks){
+    t._blockCount=blockingTruckIds(t,trucks).length;
+    totalBlock+=t._blockCount;
+    if(t._blockCount>=2)multi++;
+    maxBlock=Math.max(maxBlock,t._blockCount);
   }
-  return fallbackLevel(n);
+
+  const shape=clusterShapeQuality(trucks);
+  return{
+    free,multi,maxBlock,totalBlock,shape,
+    score:
+      Math.max(0,6-free)*2.2+
+      multi*.8+
+      maxBlock*1.1+
+      totalBlock*.08+
+      shape*4
+  };
 }
-function fallbackLevel(n){
-  // Fallback remains an irregular compact cluster. First try the harder,
-  // independently-arranged sweet order; if that cannot be found quickly,
-  // retain the same clustered geometry and use a guaranteed solver-safe order.
-  for(let attempt=0;attempt<140;attempt++){
-    const R=rng(n*191+attempt*1297+401);
-    const trucks=buildOrganicCluster(n,R,true);
-    if(!trucks)continue;
+function finishClusterLevel(trucks,order,R,n){
+  const profile=difficultyProfile(n);
 
-    const order=removalOrder(trucks,R);
-    if(!order)continue;
+  // Blocker counts are cached once for colour hiding and difficulty scoring.
+  for(const t of trucks){
+    if(t._blockCount==null)t._blockCount=blockingTruckIds(t,trucks).length;
+  }
 
-    // Cache blockers for hidden-colour selection and difficulty metadata.
-    for(const t of trucks)t._blockCount=blockingTruckIds(t,trucks).length;
+  const garage=maybeAddGarage(trucks,order,R,n,profile);
+  const gen={trucks,order:[...order],garage,sweetRows:[]};
+  assignChallengeColors(gen,R,n);
 
-    const profile=difficultyProfile(n);
-    const garage=maybeAddGarage(trucks,order,R,n,profile);
-    const gen={trucks,order,garage,sweetRows:[]};
-    assignChallengeColors(gen,R,n);
+  // Try several independent sweet schedules and keep the one that creates the
+  // most parking pressure without ever making the level impossible.
+  let best=null;
+  const sweetTries=n<=2?8:18;
+  for(let i=0;i<sweetTries;i++){
+    gen.sweetRows=buildIndependentSweetRows(gen,R);
+    const parking=simulateParkingSequence(gen);
+    if(!parking.solvable)continue;
 
-    // Try to preserve the strategic independent ordering.
-    for(let i=0;i<30;i++){
-      gen.sweetRows=buildIndependentSweetRows(gen,R);
-      const parking=simulateParkingSequence(gen);
-      if(parking.solvable){
-        gen.difficulty={
-          score:generationDifficultyScore(gen,parking),
-          maxParked:parking.maxParked,
-          forcedWrong:parking.forcedWrong,
-          initialFree:initialClearCount(trucks)
-        };
-        applyHiddenTruckColours(gen,R,n,profile);
-        if(validateGeneratedLevel(gen))return gen;
-      }
+    const score=generationDifficultyScore(gen,parking);
+    if(!best||score>best.score){
+      best={rows:[...gen.sweetRows],parking,score};
     }
+  }
 
-    // Guaranteed fallback sweet order: same organic truck pile, never rows in
-    // the yard. Only the sweet schedule is made conservative.
+  if(best){
+    gen.sweetRows=best.rows;
+    gen.difficulty={
+      score:best.score,
+      maxParked:best.parking.maxParked,
+      forcedWrong:best.parking.forcedWrong,
+      initialFree:initialClearCount(trucks)
+    };
+  }else{
+    // Guaranteed solver-safe schedule. This changes only the sweet order; the
+    // truck yard remains the same dense irregular cluster.
     const byId=new Map(allGeneratedTrucks(gen).map(t=>[t.id,t]));
     gen.sweetRows=[];
     for(const id of gen.order){
@@ -843,16 +848,65 @@ function fallbackLevel(n){
     }
 
     const parking=simulateParkingSequence(gen);
-    if(parking.solvable){
-      gen.difficulty={
-        score:generationDifficultyScore(gen,parking),
-        maxParked:parking.maxParked,
-        forcedWrong:parking.forcedWrong,
-        initialFree:initialClearCount(trucks)
-      };
-      applyHiddenTruckColours(gen,R,n,profile);
-      if(validateGeneratedLevel(gen))return gen;
+    if(!parking.solvable)return null;
+
+    gen.difficulty={
+      score:generationDifficultyScore(gen,parking),
+      maxParked:parking.maxParked,
+      forcedWrong:parking.forcedWrong,
+      initialFree:initialClearCount(trucks)
+    };
+  }
+
+  applyHiddenTruckColours(gen,R,n,profile);
+  return validateGeneratedLevel(gen)?gen:null;
+}
+function generateLevel(n){
+  // Generate a small pool of dense irregular layouts and keep the best puzzle.
+  // No rows, lanes, chains or hidden grid are used to position the trucks.
+  let best=null;
+
+  for(let attempt=0;attempt<14;attempt++){
+    const R=rng(n*73471+attempt*977+19);
+    const trucks=buildOrganicCluster(n,R,false);
+    if(!trucks)continue;
+
+    const order=removalOrder(trucks,R);
+    if(!order)continue;
+
+    const geometry=scoreClusterGeometry(trucks);
+
+    // Avoid trivial wide-open boards, but don't spend seconds searching for
+    // an artificially perfect blocker count.
+    if(geometry.free<2||geometry.free>6)continue;
+
+    if(!best||geometry.score>best.geometry.score){
+      best={trucks,order,R,geometry};
     }
+  }
+
+  if(best){
+    const gen=finishClusterLevel(best.trucks,best.order,best.R,n);
+    if(gen)return gen;
+  }
+
+  return fallbackLevel(n);
+}
+function fallbackLevel(n){
+  // Fallback is still the same organic compact-cluster generator. It simply
+  // accepts the first geometrically solvable blob instead of chasing a high
+  // difficulty score.
+  for(let attempt=0;attempt<36;attempt++){
+    const R=rng(n*191+attempt*1297+401);
+    const trucks=buildOrganicCluster(n,R,true);
+    if(!trucks)continue;
+
+    const order=removalOrder(trucks,R);
+    if(!order)continue;
+
+    scoreClusterGeometry(trucks);
+    const gen=finishClusterLevel(trucks,order,R,n);
+    if(gen)return gen;
   }
 
   throw new Error('Unable to generate a valid clustered level');
