@@ -266,7 +266,7 @@ function truckPoly(t,x=t.x,y=t.y,angle=t.angle){
   return [[-hl,-hw],[hl,-hw],[hl,hw],[-hl,hw]].map(([px,py])=>({x:x+px*c-py*s,y:y+px*s+py*c}));
 }
 function project(poly,ax,ay){let mn=Infinity,mx=-Infinity;for(const p of poly){const v=p.x*ax+p.y*ay;mn=Math.min(mn,v);mx=Math.max(mx,v)}return[mn,mx]}
-const TRUCK_GAP=1;
+const TRUCK_GAP=3;
 function polyOverlap(a,b,gap=TRUCK_GAP){
   for(const poly of [a,b])for(let i=0;i<poly.length;i++){
     const p=poly[i],q=poly[(i+1)%poly.length],ex=q.x-p.x,ey=q.y-p.y,l=Math.hypot(ex,ey)||1,ax=-ey/l,ay=ex/l;
@@ -761,41 +761,111 @@ function drawYard(){
 function drawSlotsAndParked(){
   for(let i=0;i<state.slots.length;i++){const s=state.slots[i],t=s.truck;if(!t)continue;drawTruck(t,s.x,s.y,-Math.PI/2,true);const left=t.capacity-(t.loaded||0);text(String(left),s.x,s.y+s.h/2+13,14,'#ffd743','center',1000);ctx.strokeStyle='rgba(66,50,20,.25)'}
 }
-function buildSmoothRoute(points){
+function buildSmoothRoute(points,cornerRadius=28){
   const clean=[];
   for(const p of points){
     const last=clean[clean.length-1];
-    if(!last||Math.hypot(p.x-last.x,p.y-last.y)>2)clean.push(p);
+    if(!last||Math.hypot(p.x-last.x,p.y-last.y)>1.5)clean.push({x:p.x,y:p.y});
   }
-  const samples=[];
-  const steps=12;
-  for(let i=0;i<clean.length-1;i++){
-    const p0=clean[Math.max(0,i-1)],p1=clean[i],p2=clean[i+1],p3=clean[Math.min(clean.length-1,i+2)];
-    for(let j=0;j<steps;j++){
-      const t=j/steps,t2=t*t,t3=t2*t;
-      const x=.5*((2*p1.x)+(-p0.x+p2.x)*t+(2*p0.x-5*p1.x+4*p2.x-p3.x)*t2+(-p0.x+3*p1.x-3*p2.x+p3.x)*t3);
-      const y=.5*((2*p1.y)+(-p0.y+p2.y)*t+(2*p0.y-5*p1.y+4*p2.y-p3.y)*t2+(-p0.y+3*p1.y-3*p2.y+p3.y)*t3);
-      samples.push({x,y});
+  if(clean.length<2)return{samples:clean.map((p,i)=>({...p,d:i})),total:0};
+
+  const raw=[];
+  function addPoint(p){
+    const last=raw[raw.length-1];
+    if(!last||Math.hypot(p.x-last.x,p.y-last.y)>.15)raw.push({x:p.x,y:p.y});
+  }
+  function addLine(a,b){
+    const len=Math.hypot(b.x-a.x,b.y-a.y);
+    const steps=Math.max(1,Math.ceil(len/3));
+    for(let i=1;i<=steps;i++){
+      const t=i/steps;
+      addPoint({x:lerp(a.x,b.x,t),y:lerp(a.y,b.y,t)});
     }
   }
-  samples.push(clean[clean.length-1]);
-  let total=0;
-  for(let i=0;i<samples.length;i++){
-    if(i)total+=Math.hypot(samples[i].x-samples[i-1].x,samples[i].y-samples[i-1].y);
-    samples[i].d=total;
+  function addQuad(a,c,b){
+    const approx=Math.hypot(c.x-a.x,c.y-a.y)+Math.hypot(b.x-c.x,b.y-c.y);
+    const steps=Math.max(8,Math.ceil(approx/2));
+    for(let i=1;i<=steps;i++){
+      const t=i/steps,q=1-t;
+      addPoint({
+        x:q*q*a.x+2*q*t*c.x+t*t*b.x,
+        y:q*q*a.y+2*q*t*c.y+t*t*b.y
+      });
+    }
+  }
+  function unit(a,b){
+    const dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy)||1;
+    return{x:dx/d,y:dy/d,d};
+  }
+
+  addPoint(clean[0]);
+  let cursor={...clean[0]};
+
+  for(let i=1;i<clean.length-1;i++){
+    const prev=clean[i-1],corner=clean[i],next=clean[i+1];
+    const incoming=unit(prev,corner);
+    const outgoing=unit(corner,next);
+    const cut=Math.min(cornerRadius,incoming.d*.42,outgoing.d*.42);
+
+    const enter={
+      x:corner.x-incoming.x*cut,
+      y:corner.y-incoming.y*cut
+    };
+    const exit={
+      x:corner.x+outgoing.x*cut,
+      y:corner.y+outgoing.y*cut
+    };
+
+    addLine(cursor,enter);
+    addQuad(enter,corner,exit);
+    cursor=exit;
+  }
+  addLine(cursor,clean[clean.length-1]);
+
+  // Re-sample by physical distance. This removes speed pulses at waypoints
+  // and gives the route a conveyor/road-like constant spatial resolution.
+  const cumulative=[0];
+  for(let i=1;i<raw.length;i++){
+    cumulative.push(cumulative[i-1]+Math.hypot(raw[i].x-raw[i-1].x,raw[i].y-raw[i-1].y));
+  }
+  const total=cumulative[cumulative.length-1]||0;
+  const samples=[];
+  const count=Math.max(2,Math.ceil(total/2)+1);
+  let cursorIndex=1;
+
+  for(let n=0;n<count;n++){
+    const target=n/(count-1)*total;
+    while(cursorIndex<cumulative.length-1&&cumulative[cursorIndex]<target)cursorIndex++;
+    const a=raw[Math.max(0,cursorIndex-1)],b=raw[cursorIndex]||a;
+    const span=Math.max(.001,cumulative[cursorIndex]-cumulative[Math.max(0,cursorIndex-1)]);
+    const u=clamp((target-cumulative[Math.max(0,cursorIndex-1)])/span,0,1);
+    samples.push({x:lerp(a.x,b.x,u),y:lerp(a.y,b.y,u),d:target});
   }
   return{samples,total};
 }
 function sampleRoute(route,u){
-  const target=clamp(u,0,1)*route.total,a=route.samples;
-  let i=1;
-  while(i<a.length&&a[i].d<target)i++;
-  i=Math.min(i,a.length-1);
-  const p0=a[Math.max(0,i-1)],p1=a[i],span=Math.max(.001,p1.d-p0.d),v=clamp((target-p0.d)/span,0,1);
+  const a=route.samples;
+  if(!a.length)return{x:0,y:0,a:0};
+  if(a.length===1)return{x:a[0].x,y:a[0].y,a:0};
+
+  const target=clamp(u,0,1)*route.total;
+  let lo=1,hi=a.length-1;
+  while(lo<hi){
+    const mid=(lo+hi)>>1;
+    if(a[mid].d<target)lo=mid+1;
+    else hi=mid;
+  }
+  const i=lo,p0=a[i-1],p1=a[i];
+  const span=Math.max(.001,p1.d-p0.d);
+  const v=clamp((target-p0.d)/span,0,1);
   const x=lerp(p0.x,p1.x,v),y=lerp(p0.y,p1.y,v);
-  const prev=a[Math.max(0,i-2)],next=a[Math.min(a.length-1,i+1)];
+
+  // Use a wider centred tangent so the truck rotates progressively through
+  // the rounded bend instead of twitching from sample to sample.
+  const prev=a[Math.max(0,i-3)],next=a[Math.min(a.length-1,i+3)];
   return{x,y,a:Math.atan2(next.y-prev.y,next.x-prev.x)};
 }
+
 function drawMotions(){
   for(const m of state.motions){
     const p=motionPose(m);
@@ -958,22 +1028,22 @@ function startDeparture(slotIndex){
   if(!truck)return;
 
   slot.truck=null;
-  const roadY=498;
+  const topY=JAM.y-54;
   const exitLeft=slot.x<W/2;
   const points=[
     {x:slot.x,y:slot.y},
-    {x:slot.x,y:roadY},
-    {x:exitLeft?-45:W+45,y:roadY}
+    {x:slot.x,y:topY},
+    {x:exitLeft?-70:W+70,y:topY}
   ];
-  const route=buildSmoothRoute(points);
+  const route=buildSmoothRoute(points,28);
   state.motions.push({
     type:'depart',
     truck,
     slot:slotIndex,
     route,
     t:0,
-    duration:Math.max(.58,route.total/255),
-    reverseUntil:.34
+    duration:Math.max(.7,route.total/225),
+    reverseUntil:.28
   });
   checkEnd();
 }
@@ -1004,42 +1074,106 @@ function blockedBump(t){
   t.bump={t:0,duration:.58,distance:d};
   navigator.vibrate?.([12,25,22]);
 }
+function yardExitSide(t){
+  const dx=Math.cos(t.angle),dy=Math.sin(t.angle);
+  const candidates=[];
+  if(dx>1e-4)candidates.push({side:'right',d:(JAM.x+JAM.w-t.x)/dx});
+  if(dx<-1e-4)candidates.push({side:'left',d:(JAM.x-t.x)/dx});
+  if(dy>1e-4)candidates.push({side:'bottom',d:(JAM.y+JAM.h-t.y)/dy});
+  if(dy<-1e-4)candidates.push({side:'top',d:(JAM.y-t.y)/dy});
+  const valid=candidates.filter(c=>c.d>=0).sort((a,b)=>a.d-b.d);
+  return valid[0]?.side||'top';
+}
 function dispatchTruck(t){
   const open=state.slots.findIndex(s=>s.active&&!s.truck&&!state.motions.some(m=>m.type==='dispatch'&&m.slot===state.slots.indexOf(s)));
   if(open<0){showToast('No free parking slot');return}
   if(!canDriveOut(t,state.yard)){blockedBump(t);return}
 
   state.yard=state.yard.filter(x=>x.id!==t.id);
+
   const dir={x:Math.cos(t.angle),y:Math.sin(t.angle)};
+  const exitSide=yardExitSide(t);
+
+  // First leave the jam exactly in the direction the truck is pointing.
   let d=0,ex=t.x,ey=t.y;
-  while(d<520){
-    d+=8;ex=t.x+dir.x*d;ey=t.y+dir.y*d;
+  while(d<560){
+    d+=4;
+    ex=t.x+dir.x*d;
+    ey=t.y+dir.y*d;
     if(!insideJam(t,ex,ey))break;
   }
 
-  const slot=state.slots[open],roadY=498,points=[{x:t.x,y:t.y},{x:ex,y:ey}];
-  const top=ey<JAM.y,left=ex<JAM.x,right=ex>JAM.x+JAM.w,bottom=ey>JAM.y+JAM.h;
+  // Continue farther outside before asking the truck to turn. This is the
+  // manoeuvring space shown around the parking rectangle in the reference.
+  const manoeuvreRun=34;
+  const mx=ex+dir.x*manoeuvreRun;
+  const my=ey+dir.y*manoeuvreRun;
 
-  if(top){
-    points.push({x:ex,y:roadY});
-  }else if(left){
-    points.push({x:JAM.x-18,y:ey},{x:JAM.x-18,y:roadY});
-  }else if(right){
-    points.push({x:JAM.x+JAM.w+18,y:ey},{x:JAM.x+JAM.w+18,y:roadY});
-  }else if(bottom){
-    const sideX=t.x<W/2?JAM.x-18:JAM.x+JAM.w+18;
-    points.push({x:t.x,y:JAM.y+JAM.h+18},{x:sideX,y:JAM.y+JAM.h+18},{x:sideX,y:roadY});
+  const laneClearance=54;
+  const nominalLeft=JAM.x-laneClearance;
+  const nominalRight=JAM.x+JAM.w+laneClearance;
+  const nominalTop=JAM.y-laneClearance;
+  const nominalBottom=JAM.y+JAM.h+laneClearance;
+
+  const slot=state.slots[open];
+  const points=[
+    {x:t.x,y:t.y},
+    {x:ex,y:ey},
+    {x:mx,y:my}
+  ];
+
+  if(exitSide==='left'){
+    // Red arrows: up the left edge, then right across the top.
+    const leftX=Math.min(nominalLeft,mx);
+    const topY=Math.min(nominalTop,my);
+    points.push(
+      {x:leftX,y:my},
+      {x:leftX,y:topY},
+      {x:slot.x,y:topY},
+      {x:slot.x,y:slot.y}
+    );
+  }else if(exitSide==='right'){
+    // Red arrows: up the right edge, then left across the top.
+    const rightX=Math.max(nominalRight,mx);
+    const topY=Math.min(nominalTop,my);
+    points.push(
+      {x:rightX,y:my},
+      {x:rightX,y:topY},
+      {x:slot.x,y:topY},
+      {x:slot.x,y:slot.y}
+    );
+  }else if(exitSide==='bottom'){
+    // Red arrows: left along the bottom, up the left edge, then right across
+    // the top toward the chosen parking bay.
+    const bottomY=Math.max(nominalBottom,my);
+    const leftX=Math.min(nominalLeft,mx);
+    const topY=nominalTop;
+    points.push(
+      {x:mx,y:bottomY},
+      {x:leftX,y:bottomY},
+      {x:leftX,y:topY},
+      {x:slot.x,y:topY},
+      {x:slot.x,y:slot.y}
+    );
+  }else{
+    // Already exited through the top: keep moving outward, then turn onto the
+    // top circulation lane and approach the parking bay horizontally.
+    const topY=Math.min(nominalTop,my);
+    points.push(
+      {x:mx,y:topY},
+      {x:slot.x,y:topY},
+      {x:slot.x,y:slot.y}
+    );
   }
 
-  points.push({x:slot.x,y:roadY},{x:slot.x,y:slot.y});
-  const route=buildSmoothRoute(points);
+  const route=buildSmoothRoute(points,30);
   state.motions.push({
     type:'dispatch',
     truck:t,
     slot:open,
     route,
     t:0,
-    duration:Math.max(.62,route.total/260)
+    duration:Math.max(.78,route.total/235)
   });
   navigator.vibrate?.(12);
 }
