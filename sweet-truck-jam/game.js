@@ -266,11 +266,16 @@ function truckPoly(t,x=t.x,y=t.y,angle=t.angle){
   return [[-hl,-hw],[hl,-hw],[hl,hw],[-hl,hw]].map(([px,py])=>({x:x+px*c-py*s,y:y+px*s+py*c}));
 }
 function project(poly,ax,ay){let mn=Infinity,mx=-Infinity;for(const p of poly){const v=p.x*ax+p.y*ay;mn=Math.min(mn,v);mx=Math.max(mx,v)}return[mn,mx]}
-function polyOverlap(a,b){
+const TRUCK_GAP=1;
+function polyOverlap(a,b,gap=TRUCK_GAP){
   for(const poly of [a,b])for(let i=0;i<poly.length;i++){
     const p=poly[i],q=poly[(i+1)%poly.length],ex=q.x-p.x,ey=q.y-p.y,l=Math.hypot(ex,ey)||1,ax=-ey/l,ay=ex/l;
-    const A=project(a,ax,ay),B=project(b,ax,ay); if(A[1]<B[0]+2||B[1]<A[0]+2)return false;
-  } return true;
+    const A=project(a,ax,ay),B=project(b,ax,ay);
+    // Exactly 1 px of separation is legal. Anything closer counts as a
+    // collision so settled yard trucks retain a visible one-pixel gap.
+    if(A[1]<=B[0]-gap||B[1]<=A[0]-gap)return false;
+  }
+  return true;
 }
 function insideJam(t,x=t.x,y=t.y){const p=truckPoly(t,x,y);return p.some(v=>v.x>JAM.x&&v.x<JAM.x+JAM.w&&v.y>JAM.y&&v.y<JAM.y+JAM.h)}
 function canDriveOut(t,trucks){
@@ -300,9 +305,28 @@ function tryCompactStep(t,dx,dy,trucks,step=2.25){
   const len=Math.hypot(dx,dy);
   if(len<.001)return false;
   const nx=dx/len,ny=dy/len;
-  const x=t.x+nx*step,y=t.y+ny*step;
-  if(!truckPositionLegal(t,x,y,trucks))return false;
-  t.x=x;t.y=y;
+  const ox=t.x,oy=t.y;
+  const tx=ox+nx*step,ty=oy+ny*step;
+
+  if(truckPositionLegal(t,tx,ty,trucks)){
+    t.x=tx;t.y=ty;
+    return true;
+  }
+
+  // If the requested step would cross the 1 px clearance boundary, binary
+  // search the remaining distance so the truck settles right up to that
+  // boundary instead of stopping a whole compaction step away.
+  let lo=0,hi=step;
+  for(let i=0;i<12;i++){
+    const mid=(lo+hi)/2;
+    const x=ox+nx*mid,y=oy+ny*mid;
+    if(truckPositionLegal(t,x,y,trucks))lo=mid;
+    else hi=mid;
+  }
+
+  if(lo<=.015)return false;
+  t.x=ox+nx*lo;
+  t.y=oy+ny*lo;
   return true;
 }
 function compactTruckLayout(trucks){
