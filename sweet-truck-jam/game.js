@@ -63,61 +63,66 @@ function roundedRect(x,y,w,h,r,fill,stroke,line=1){
 function text(s,x,y,size,fill='#fff',align='center',weight=900){ctx.fillStyle=fill;ctx.textAlign=align;ctx.textBaseline='middle';ctx.font=`${weight} ${size}px ui-rounded,system-ui,-apple-system`;ctx.fillText(s,x,y)}
 
 function makeCandyPath(){
-  // Keep the green-line silhouette, but smooth it with repeated closed-curve
-  // corner cutting so curvature changes are gradual like the reference video.
-  let pts=[
-    [315.0,203.7],
-    [313.2,249.3],
-    [251.7,295.9],
-    [216.6,305.0],
-    [145.1,305.0],
-    [120.5,289.0],
-    [105.0,248.8],
-    [113.7,239.3],
-    [113.7,194.5],
-    [129.1,136.1],
-    [142.8,116.5],
-    [178.3,95.5],
-    [214.8,95.0],
-    [229.4,102.3],
-    [241.2,120.6],
-    [246.7,174.4],
-    [302.2,185.8]
-  ].map(([x,y])=>({x,y}));
+  // Same overall green-line layout, rebuilt as deliberate geometry:
+  // true straights joined by controlled-radius corners instead of a globally
+  // smoothed hand-drawn outline.
+  const raw=[];
 
-  // Chaikin-style subdivision preserves the overall traced silhouette while
-  // removing the visible kinks and abrupt tangent changes.
-  const ratio=.20;
-  for(let round=0;round<4;round++){
-    const next=[];
-    for(let i=0;i<pts.length;i++){
-      const a=pts[i],b=pts[(i+1)%pts.length];
-      next.push({x:lerp(a.x,b.x,ratio),y:lerp(a.y,b.y,ratio)});
-      next.push({x:lerp(a.x,b.x,1-ratio),y:lerp(a.y,b.y,1-ratio)});
+  function addLine(a,b,steps=28){
+    for(let i=0;i<steps;i++){
+      const t=i/steps;
+      raw.push({x:lerp(a[0],b[0],t),y:lerp(a[1],b[1],t)});
     }
-    pts=next;
   }
 
-  // Uniform-distance resampling keeps the 36 logical rows moving at a constant
-  // physical speed around the smoothed outline.
-  const closed=[...pts,{...pts[0]}];
-  const cumulative=[0];
-  for(let i=1;i<closed.length;i++){
-    cumulative.push(cumulative[i-1]+Math.hypot(closed[i].x-closed[i-1].x,closed[i].y-closed[i-1].y));
+  function addCubic(a,c1,c2,b,steps=40){
+    for(let i=0;i<steps;i++){
+      const t=i/steps,q=1-t;
+      raw.push({
+        x:q*q*q*a[0]+3*q*q*t*c1[0]+3*q*t*t*c2[0]+t*t*t*b[0],
+        y:q*q*q*a[1]+3*q*q*t*c1[1]+3*q*t*t*c2[1]+t*t*t*b[1]
+      });
+    }
   }
+
+  addCubic([315,204],[317,220],[317,238],[313,250]);
+  addCubic([313,250],[305,278],[282,297],[255,305]);
+
+  addLine([255,305],[145,305]);
+
+  addCubic([145,305],[127,305],[112,290],[112,272]);
+  addLine([112,272],[112,160]);
+
+  addCubic([112,160],[112,132],[138,108],[170,100]);
+  addLine([170,100],[212,100]);
+
+  addCubic([212,100],[230,100],[241,110],[245,126]);
+  addLine([245,126],[247,165]);
+  addCubic([247,165],[247,179],[254,185],[268,187]);
+  addLine([268,187],[298,187]);
+
+  addCubic([298,187],[307,187],[313,194],[315,204]);
+  raw.push({...raw[0]});
+
+  const cumulative=[0];
+  for(let i=1;i<raw.length;i++){
+    cumulative.push(cumulative[i-1]+Math.hypot(raw[i].x-raw[i-1].x,raw[i].y-raw[i-1].y));
+  }
+
   const total=cumulative[cumulative.length-1];
   const dense=[];
-  const sampleCount=320;
+  const sampleCount=360;
   let cursor=1;
 
   for(let n=0;n<sampleCount;n++){
     const target=n/(sampleCount-1)*total;
     while(cursor<cumulative.length-1&&cumulative[cursor]<target)cursor++;
-    const a=closed[cursor-1],b=closed[cursor];
+    const a=raw[cursor-1],b=raw[cursor];
     const span=Math.max(.001,cumulative[cursor]-cumulative[cursor-1]);
     const u=(target-cumulative[cursor-1])/span;
     dense.push({x:lerp(a.x,b.x,u),y:lerp(a.y,b.y,u)});
   }
+
   return dense;
 }
 candyPath=makeCandyPath();
