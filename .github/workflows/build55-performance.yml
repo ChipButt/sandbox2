@@ -1,0 +1,171 @@
+name: Build 55 Performance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build55-performance.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cache 3D sweet sprites and publish Build 55
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('sweet-truck-jam/game.js')
+          s = path.read_text()
+
+          start = s.index('function drawCandy(c,index){')
+          end = s.index('function drawFeederRows(', start)
+
+          block = r'''const sweetSpriteCache=new Map();
+          const SWEET_SPRITE_SCALE=4;
+          const SWEET_SPRITE_PAD=4;
+
+          function buildSweetSphereSprite(color){
+            const base=COLORS[color]||'#999';
+            const r=SWEET_RADIUS;
+            const logicalSize=(r+SWEET_SPRITE_PAD)*2;
+            const size=Math.ceil(logicalSize*SWEET_SPRITE_SCALE);
+            const sprite=document.createElement('canvas');
+            sprite.width=size;
+            sprite.height=size;
+            sprite._logicalSize=logicalSize;
+
+            const g=sprite.getContext('2d');
+            g.scale(SWEET_SPRITE_SCALE,SWEET_SPRITE_SCALE);
+            g.translate(logicalSize/2,logicalSize/2);
+
+            // Render the expensive 3D lighting once per colour, not once per
+            // sweet on every animation frame.
+            g.beginPath();
+            g.ellipse(r*.14,r*.56,r*.82,r*.34,0,0,Math.PI*2);
+            g.fillStyle='rgba(0,0,0,.20)';
+            g.fill();
+
+            const sphere=g.createRadialGradient(
+              -r*.40,-r*.43,r*.04,
+              r*.12,r*.14,r*1.18
+            );
+            sphere.addColorStop(0,'rgba(255,255,255,.98)');
+            sphere.addColorStop(.11,shade(base,.36));
+            sphere.addColorStop(.34,shade(base,.14));
+            sphere.addColorStop(.62,base);
+            sphere.addColorStop(.84,shade(base,-.18));
+            sphere.addColorStop(1,shade(base,-.36));
+            g.beginPath();
+            g.arc(0,0,r,0,Math.PI*2);
+            g.fillStyle=sphere;
+            g.fill();
+
+            const lower=g.createLinearGradient(0,-r*.15,0,r);
+            lower.addColorStop(0,'rgba(0,0,0,0)');
+            lower.addColorStop(.58,'rgba(0,0,0,.02)');
+            lower.addColorStop(1,'rgba(0,0,0,.20)');
+            g.beginPath();
+            g.arc(0,0,r*.96,0,Math.PI*2);
+            g.fillStyle=lower;
+            g.fill();
+
+            const gloss=g.createRadialGradient(
+              -r*.34,-r*.37,0,
+              -r*.27,-r*.29,r*.56
+            );
+            gloss.addColorStop(0,'rgba(255,255,255,.96)');
+            gloss.addColorStop(.30,'rgba(255,255,255,.58)');
+            gloss.addColorStop(.72,'rgba(255,255,255,.13)');
+            gloss.addColorStop(1,'rgba(255,255,255,0)');
+            g.beginPath();
+            g.arc(-r*.18,-r*.22,r*.49,0,Math.PI*2);
+            g.fillStyle=gloss;
+            g.fill();
+
+            g.beginPath();
+            g.arc(-r*.43,-r*.46,Math.max(.7,r*.11),0,Math.PI*2);
+            g.fillStyle='rgba(255,255,255,.98)';
+            g.fill();
+
+            g.beginPath();
+            g.arc(0,0,r-.3,.10*Math.PI,.90*Math.PI);
+            g.strokeStyle='rgba(0,0,0,.15)';
+            g.lineWidth=Math.max(.7,r*.08);
+            g.stroke();
+
+            return sprite;
+          }
+          function getSweetSphereSprite(color){
+            let sprite=sweetSpriteCache.get(color);
+            if(!sprite){
+              sprite=buildSweetSphereSprite(color);
+              sweetSpriteCache.set(color,sprite);
+            }
+            return sprite;
+          }
+          function drawCandy(c,index){
+            const p=candyPos(c.visualIndex);
+            drawSweetAt(p,c.color,SWEET_RADIUS);
+          }
+          function drawSweetAt(p,color,r=SWEET_RADIUS){
+            const sprite=getSweetSphereSprite(color);
+            const logicalSize=sprite._logicalSize;
+            const scale=r/SWEET_RADIUS;
+            const size=logicalSize*scale;
+            ctx.drawImage(sprite,p.x-size/2,p.y-size/2,size,size);
+          }
+          '''
+
+          s = s[:start] + block + s[end:]
+
+          # At low frame rates the old 33ms clamp made the entire simulation
+          # visibly run in slow motion. Keep a safety cap, but allow real elapsed
+          # time down to roughly 10fps.
+          s = s.replace(
+              "const dt=Math.min(.033,(ts-last)/1000||.016);",
+              "const dt=Math.min(.10,(ts-last)/1000||.016);"
+          )
+
+          # iPhones can otherwise render a large full-screen canvas at 2.5x DPR.
+          # 2x remains Retina-sharp while reducing fill work substantially.
+          s = s.replace(
+              "dpr=Math.min(devicePixelRatio||1,2.5);",
+              "dpr=Math.min(devicePixelRatio||1,2);"
+          )
+
+          # Protect the requested pre-doubling geometry.
+          assert 'const SWEET_RADIUS=7;' in s
+          assert 'const ROTATION_CAPACITY=144;' in s
+          assert 'const CENTRAL_LANE_SPACING=13.2;' in s
+          assert 'const TRUCK_GAP=3;' in s
+          assert 'const sweetSpriteCache=new Map();' in s
+          assert "Math.min(.10,(ts-last)/1000||.016)" in s
+
+          path.write_text(s)
+          Path('sweet-truck-jam/game55.js').write_text(s)
+
+          index = Path('sweet-truck-jam/index.html')
+          html = index.read_text()
+          html = re.sub(r'game(?:\d+)?\.js\?v=\d+', 'game55.js?v=55', html)
+          html = re.sub(r'style\.css\?v=\d+', 'style.css?v=55', html)
+          index.write_text(html)
+          PY
+
+          node --check sweet-truck-jam/game.js
+          node --check sweet-truck-jam/game55.js
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add sweet-truck-jam/game.js sweet-truck-jam/game55.js sweet-truck-jam/index.html
+          git commit -m 'Publish Build 55 performance-optimized 3D sweets'
+          git push
