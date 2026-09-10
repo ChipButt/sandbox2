@@ -1,0 +1,32 @@
+name: Build 63 Fullscreen Zoom
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build63-fullscreen-zoom.yml'
+      - '.github/scripts/build63_fullscreen_zoom.py'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply Build 63 patch
+        run: python3 .github/scripts/build63_fullscreen_zoom.py
+      - name: Check JavaScript
+        run: |
+          node --check sweet-truck-jam/game.js
+          node --check sweet-truck-jam/game63.js
+      - name: Commit Build 63
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add sweet-truck-jam/game.js sweet-truck-jam/game63.js sweet-truck-jam/index.html
+          git commit -m 'Publish Build 63 with tighter fullscreen framing'
+          git push
