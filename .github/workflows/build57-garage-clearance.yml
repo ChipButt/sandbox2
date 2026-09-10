@@ -1,0 +1,184 @@
+name: Build 57 Garage Clearance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build57-garage-clearance.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reserve clear counter space for underground garages and publish Build 57
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('sweet-truck-jam/game.js')
+          s = path.read_text()
+
+          start = s.index('function garageBadgePlacement(host,trucks){')
+          end = s.index('function addUndergroundGarage(gen,r,n){', start)
+
+          helper = r'''function garageBadgePlacement(host,trucks){
+            const badgeW=36,badgeH=24,halfW=badgeW/2,halfH=badgeH/2;
+            const ca=Math.cos(host.angle),sa=Math.sin(host.angle);
+            const fx=ca,fy=sa,sx=-sa,sy=ca;
+            const others=trucks.filter(t=>t.id!==host.id);
+            const cx=others.length?others.reduce((a,t)=>a+t.x,0)/others.length:JAM.x+JAM.w/2;
+            const cy=others.length?others.reduce((a,t)=>a+t.y,0)/others.length:JAM.y+JAM.h/2;
+
+            // The counter belongs outside the truck cluster, not squeezed into
+            // whatever first gap happens to exist beside the garage.
+            let ox=host.x-cx,oy=host.y-cy,ol=Math.hypot(ox,oy);
+            if(ol<1){ox=-sy;oy=sx;ol=1}
+            ox/=ol;oy/=ol;
+            const px=-oy,py=ox;
+            const radial=Math.max(host.length,host.width)/2+34;
+
+            const candidates=[
+              {x:host.x+ox*radial,y:host.y+oy*radial},
+              {x:host.x+ox*radial+px*18,y:host.y+oy*radial+py*18},
+              {x:host.x+ox*radial-px*18,y:host.y+oy*radial-py*18},
+              {x:host.x+sx*(host.width/2+31),y:host.y+sy*(host.width/2+31)},
+              {x:host.x-sx*(host.width/2+31),y:host.y-sy*(host.width/2+31)},
+              {x:host.x-fx*(host.length/2+31),y:host.y-fy*(host.length/2+31)},
+              {x:host.x+fx*(host.length/2+22)+sx*(host.width/2+22),y:host.y+fy*(host.length/2+22)+sy*(host.width/2+22)},
+              {x:host.x+fx*(host.length/2+22)-sx*(host.width/2+22),y:host.y+fy*(host.length/2+22)-sy*(host.width/2+22)},
+              {x:host.x-fx*(host.length/2+22)+sx*(host.width/2+22),y:host.y-fy*(host.length/2+22)+sy*(host.width/2+22)},
+              {x:host.x-fx*(host.length/2+22)-sx*(host.width/2+22),y:host.y-fy*(host.length/2+22)-sy*(host.width/2+22)}
+            ];
+
+            function badgePoly(c,pad=0){
+              return[
+                {x:c.x-halfW-pad,y:c.y-halfH-pad},
+                {x:c.x+halfW+pad,y:c.y-halfH-pad},
+                {x:c.x+halfW+pad,y:c.y+halfH+pad},
+                {x:c.x-halfW-pad,y:c.y+halfH+pad}
+              ];
+            }
+            function inYard(c,pad=0){
+              return c.x-halfW-pad>=JAM.x+5&&c.x+halfW+pad<=JAM.x+JAM.w-5&&
+                     c.y-halfH-pad>=JAM.y+5&&c.y+halfH+pad<=JAM.y+JAM.h-5;
+            }
+            function clearOfTrucks(c){
+              // Reserve a real visual pocket around the counter, not merely a
+              // non-overlapping rectangle.
+              const p=badgePoly(c,10);
+              return !trucks.some(t=>polyOverlap(p,truckPoly(t),0));
+            }
+            function clearOfExitPaths(c){
+              const p=badgePoly(c,7);
+              for(const t of trucks){
+                // Only trucks that can currently move can visually cross the
+                // counter before the cluster changes. Always include the garage
+                // host because it must be able to leave without driving through
+                // its own remaining-truck number.
+                if(t.id!==host.id&&!canDriveOut(t,trucks))continue;
+                const dx=Math.cos(t.angle),dy=Math.sin(t.angle);
+                for(let d=0;d<=130;d+=13){
+                  const x=t.x+dx*d,y=t.y+dy*d;
+                  if(polyOverlap(p,truckPoly(t,x,y),0))return false;
+                  if(d>0&&!insideJam(t,x,y))break;
+                }
+              }
+              return true;
+            }
+            function nearestClearance(c){
+              let best=Infinity;
+              const br=Math.hypot(halfW,halfH);
+              for(const t of trucks){
+                const tr=Math.hypot(t.length/2,t.width/2);
+                best=Math.min(best,Math.hypot(c.x-t.x,c.y-t.y)-tr-br);
+              }
+              return best;
+            }
+
+            const hostRadius=Math.hypot(host.x-cx,host.y-cy);
+            let best=null;
+            for(const c of candidates){
+              if(!inYard(c,8))continue;
+              const outwardGain=Math.hypot(c.x-cx,c.y-cy)-hostRadius;
+              if(outwardGain<8)continue;
+              if(!clearOfTrucks(c))continue;
+              if(!clearOfExitPaths(c))continue;
+
+              const clearance=nearestClearance(c);
+              const score=outwardGain*1.6+clearance;
+              if(!best||score>best.score){
+                best={x:c.x,y:c.y,w:badgeW,h:badgeH,score,clearance};
+              }
+            }
+            return best;
+          }
+          '''
+
+          s = s[:start] + helper + s[end:]
+
+          sel_start = s.index('  // A garage may only occupy a truck position if there is a separate clear')
+          sel_end = s.index('  const extra=', sel_start)
+          selection = r'''  // A garage is only allowed on an exposed truck position with a reserved
+            // counter pocket. Choose the clearest valid location rather than the
+            // first/random location, so the number never sits inside the truck pile.
+            const eligible=[];
+            for(const t of preferred){
+              const badge=garageBadgePlacement(t,gen.trucks);
+              if(badge)eligible.push({host:t,badge});
+            }
+            if(!eligible.length){
+              for(const t of free){
+                if(preferred.includes(t))continue;
+                const badge=garageBadgePlacement(t,gen.trucks);
+                if(badge)eligible.push({host:t,badge});
+              }
+            }
+            if(!eligible.length)return !forced;
+
+            eligible.sort((a,b)=>b.badge.score-a.badge.score);
+            const picked=eligible[0];
+            const host=picked.host,badge=picked.badge;
+          '''
+          s = s[:sel_start] + selection + s[sel_end:]
+
+          # Keep the counter coordinates generated with the level and carried
+          # through runtime state. The existing drawGarage uses these coordinates.
+          assert 'badgeX:badge.x,badgeY:badge.y,badgeW:badge.w,badgeH:badge.h' in s
+          assert 'badgeX:gen.garage.badgeX' in s
+          assert 'const bx=g.badgeX??' in s
+          assert 'const TRUCK_GAP=3;' in s
+          assert 'const SWEET_RADIUS=7;' in s
+          assert 'row-phase' in s  # clockwise central conveyor remains intact
+          assert 'const sweetSpriteCache=new Map();' in s
+          assert 'outwardGain<8' in s
+          assert 'badgePoly(c,10)' in s
+          assert 'clearOfExitPaths' in s
+          assert 'eligible.sort((a,b)=>b.badge.score-a.badge.score)' in s
+
+          path.write_text(s)
+          Path('sweet-truck-jam/game57.js').write_text(s)
+
+          index = Path('sweet-truck-jam/index.html')
+          html = index.read_text()
+          html = re.sub(r'game(?:\d+)?\.js\?v=\d+', 'game57.js?v=57', html)
+          html = re.sub(r'style\.css\?v=\d+', 'style.css?v=57', html)
+          index.write_text(html)
+          PY
+
+          node --check sweet-truck-jam/game.js
+          node --check sweet-truck-jam/game57.js
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add sweet-truck-jam/game.js sweet-truck-jam/game57.js sweet-truck-jam/index.html
+          git commit -m 'Publish Build 57 with clear underground garage counters'
+          git push
