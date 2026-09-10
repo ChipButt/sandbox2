@@ -1,0 +1,32 @@
+name: Build 62 Side Feeds Mixed Rows
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build62-side-feeds-mixed-rows.yml'
+      - '.github/scripts/build62_side_feeds_mixed_rows.py'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply Build 62 patch
+        run: python3 .github/scripts/build62_side_feeds_mixed_rows.py
+      - name: Check JavaScript
+        run: |
+          node --check sweet-truck-jam/game.js
+          node --check sweet-truck-jam/game62.js
+      - name: Commit Build 62
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add sweet-truck-jam/game.js sweet-truck-jam/game62.js sweet-truck-jam/index.html
+          git commit -m 'Publish Build 62 with side-only feeders and mixed sweet rows'
+          git push
