@@ -1,0 +1,166 @@
+name: Build 58 Attached Garage Counter
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build58-attached-garage-counter.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Attach garage counters and publish Build 58
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('sweet-truck-jam/game.js')
+          s = path.read_text()
+
+          start = s.index('function garageBadgePlacement(host,trucks){')
+          end = s.index('function addUndergroundGarage(gen,r,n){', start)
+
+          replacement = r'''function garageBadgePlacement(host,trucks){
+            const badgeW=34,badgeH=22,halfW=badgeW/2,halfH=badgeH/2;
+            const ca=Math.cos(host.angle),sa=Math.sin(host.angle);
+            const fx=ca,fy=sa,sx=-sa,sy=ca;
+            const hatchHL=host.length/2+5;
+            const hatchHW=host.width/2+6;
+            const clusterX=trucks.reduce((a,t)=>a+t.x,0)/Math.max(1,trucks.length);
+            const clusterY=trucks.reduce((a,t)=>a+t.y,0)/Math.max(1,trucks.length);
+
+            function badgePoly(c,pad=0){
+              return[
+                {x:c.x-halfW-pad,y:c.y-halfH-pad},
+                {x:c.x+halfW+pad,y:c.y-halfH-pad},
+                {x:c.x+halfW+pad,y:c.y+halfH+pad},
+                {x:c.x-halfW-pad,y:c.y+halfH+pad}
+              ];
+            }
+            function segmentBox(ax,ay,bx,by,pad=5){
+              const minX=Math.min(ax,bx)-pad,maxX=Math.max(ax,bx)+pad;
+              const minY=Math.min(ay,by)-pad,maxY=Math.max(ay,by)+pad;
+              return[
+                {x:minX,y:minY},{x:maxX,y:minY},
+                {x:maxX,y:maxY},{x:minX,y:maxY}
+              ];
+            }
+            function inYard(c,pad=7){
+              return c.x-halfW-pad>=JAM.x&&c.x+halfW+pad<=JAM.x+JAM.w&&
+                     c.y-halfH-pad>=JAM.y&&c.y+halfH+pad<=JAM.y+JAM.h;
+            }
+            function badgeExtentAlong(dx,dy){
+              return Math.abs(dx)*halfW+Math.abs(dy)*halfH;
+            }
+
+            // The counter is an attached tab. Never use the truck's forward
+            // edge because that is its immediate escape direction. Side and
+            // rear edges remain eligible if the complete tab/corridor is clear.
+            const dirs=[
+              {dx:sx,dy:sy,edge:hatchHW},
+              {dx:-sx,dy:-sy,edge:hatchHW},
+              {dx:-fx,dy:-fy,edge:hatchHL}
+            ];
+            const candidates=[];
+            const others=trucks.filter(t=>t.id!==host.id);
+
+            for(const d of dirs){
+              const badgeExtent=badgeExtentAlong(d.dx,d.dy);
+              // Two-pixel overlap with the garage edge makes the badge visibly
+              // connected to the tile rather than floating beside it.
+              const centreDist=d.edge+badgeExtent-2;
+              const c={
+                x:host.x+d.dx*centreDist,
+                y:host.y+d.dy*centreDist
+              };
+              if(!inYard(c,8))continue;
+
+              const attach={
+                x:host.x+d.dx*d.edge,
+                y:host.y+d.dy*d.edge
+              };
+              const badgeClear=badgePoly(c,8);
+              const connectorClear=segmentBox(attach.x,attach.y,c.x,c.y,6);
+
+              if(others.some(t=>polyOverlap(badgeClear,truckPoly(t),4)))continue;
+              if(others.some(t=>polyOverlap(connectorClear,truckPoly(t),4)))continue;
+
+              // Also reserve the first section of the garage truck's forward
+              // route so the attached counter never sits across its escape path.
+              const escapeEnd={x:host.x+fx*(host.length+34),y:host.y+fy*(host.length+34)};
+              const escapeBox=segmentBox(host.x,host.y,escapeEnd.x,escapeEnd.y,host.width/2+5);
+              if(polyOverlap(badgeClear,escapeBox,2)||polyOverlap(connectorClear,escapeBox,2))continue;
+
+              let nearest=999;
+              for(const t of others){
+                const centreDistToTruck=Math.hypot(c.x-t.x,c.y-t.y);
+                nearest=Math.min(nearest,centreDistToTruck-Math.max(t.length,t.width)/2);
+              }
+              const outward=Math.hypot(c.x-clusterX,c.y-clusterY)-Math.hypot(host.x-clusterX,host.y-clusterY);
+              const score=nearest+outward*.8;
+              candidates.push({x:c.x,y:c.y,w:badgeW,h:badgeH,attachX:attach.x,attachY:attach.y,score});
+            }
+
+            if(!candidates.length)return null;
+            candidates.sort((a,b)=>b.score-a.score);
+            return candidates[0];
+          }
+          '''
+
+          s = s[:start] + replacement + s[end:]
+
+          old = """  const picked=choice(r,eligible);\n  const host=picked.host,badge=picked.badge;"""
+          new = """  // Prefer the garage position whose attached counter has the most\n  // breathing room, rather than choosing a merely-valid position at random.\n  eligible.sort((a,b)=>(b.badge.score||0)-(a.badge.score||0));\n  const picked=eligible[0];\n  const host=picked.host,badge=picked.badge;"""
+          assert old in s
+          s = s.replace(old,new,1)
+
+          old = """    currentId:host.id,queue,\n    badgeX:badge.x,badgeY:badge.y,badgeW:badge.w,badgeH:badge.h\n  };"""
+          new = """    currentId:host.id,queue,\n    badgeX:badge.x,badgeY:badge.y,badgeW:badge.w,badgeH:badge.h,\n    badgeAttachX:badge.attachX,badgeAttachY:badge.attachY\n  };"""
+          assert old in s
+          s = s.replace(old,new,1)
+
+          old = """    badgeX:gen.garage.badgeX,badgeY:gen.garage.badgeY,badgeW:gen.garage.badgeW,badgeH:gen.garage.badgeH,\n    queue:gen.garage.queue.map(t=>({...t,state:'underground'}))"""
+          new = """    badgeX:gen.garage.badgeX,badgeY:gen.garage.badgeY,badgeW:gen.garage.badgeW,badgeH:gen.garage.badgeH,\n    badgeAttachX:gen.garage.badgeAttachX,badgeAttachY:gen.garage.badgeAttachY,\n    queue:gen.garage.queue.map(t=>({...t,state:'underground'}))"""
+          assert old in s
+          s = s.replace(old,new,1)
+
+          old = """  const bw=g.badgeW||34,bh=g.badgeH||22;\n  roundedRect(bx-bw/2,by-bh/2,bw,bh,bh/2,'#252c35','#fff',1.4);\n  text('↓ '+String(remaining),bx,by,11,'#fff','center',1000);"""
+          new = """  const bw=g.badgeW||34,bh=g.badgeH||22;\n\n  // Draw a short physical neck from the garage tile to the counter so the\n  // count reads as part of the garage, never as a floating UI badge.\n  const ax=g.badgeAttachX??g.x,ay=g.badgeAttachY??g.y;\n  ctx.save();\n  ctx.lineCap='round';\n  ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(bx,by);\n  ctx.strokeStyle='#fff';ctx.lineWidth=9;ctx.stroke();\n  ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(bx,by);\n  ctx.strokeStyle='#252c35';ctx.lineWidth=6;ctx.stroke();\n  ctx.restore();\n\n  roundedRect(bx-bw/2,by-bh/2,bw,bh,bh/2,'#252c35','#fff',1.4);\n  text('↓ '+String(remaining),bx,by,11,'#fff','center',1000);"""
+          assert old in s
+          s = s.replace(old,new,1)
+
+          assert 'badgeAttachX:badge.attachX' in s
+          assert 'eligible.sort((a,b)=>(b.badge.score||0)-(a.badge.score||0))' in s
+          assert "ctx.lineTo(bx,by)" in s
+          assert 'const SWEET_RADIUS=7;' in s
+          assert 'const ROTATION_CAPACITY=144;' in s
+          assert 'const TRUCK_GAP=3;' in s
+
+          path.write_text(s)
+          Path('sweet-truck-jam/game58.js').write_text(s)
+
+          index = Path('sweet-truck-jam/index.html')
+          html = index.read_text()
+          html = re.sub(r'game(?:\\d+)?\\.js\\?v=\\d+', 'game58.js?v=58', html)
+          html = re.sub(r'style\\.css\\?v=\\d+', 'style.css?v=58', html)
+          index.write_text(html)
+          PY
+
+          node --check sweet-truck-jam/game.js
+          node --check sweet-truck-jam/game58.js
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add sweet-truck-jam/game.js sweet-truck-jam/game58.js sweet-truck-jam/index.html
+          git commit -m 'Publish Build 58 with attached clear garage counters'
+          git push
