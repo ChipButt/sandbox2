@@ -450,41 +450,95 @@ function difficultyProfile(n){
 }
 function allGeneratedTrucks(gen){return gen.garage?[...gen.trucks,...gen.garage.queue]:[...gen.trucks]}
 function garageBadgePlacement(host,trucks){
-  const badgeW=34,badgeH=22,halfW=badgeW/2,halfH=badgeH/2;
+  const badgeW=36,badgeH=24,halfW=badgeW/2,halfH=badgeH/2;
   const ca=Math.cos(host.angle),sa=Math.sin(host.angle);
   const fx=ca,fy=sa,sx=-sa,sy=ca;
+  const others=trucks.filter(t=>t.id!==host.id);
+  const cx=others.length?others.reduce((a,t)=>a+t.x,0)/others.length:JAM.x+JAM.w/2;
+  const cy=others.length?others.reduce((a,t)=>a+t.y,0)/others.length:JAM.y+JAM.h/2;
+
+  // The counter belongs outside the truck cluster, not squeezed into
+  // whatever first gap happens to exist beside the garage.
+  let ox=host.x-cx,oy=host.y-cy,ol=Math.hypot(ox,oy);
+  if(ol<1){ox=-sy;oy=sx;ol=1}
+  ox/=ol;oy/=ol;
+  const px=-oy,py=ox;
+  const radial=Math.max(host.length,host.width)/2+34;
 
   const candidates=[
-    {x:host.x+sx*(host.width/2+27),y:host.y+sy*(host.width/2+27)},
-    {x:host.x-sx*(host.width/2+27),y:host.y-sy*(host.width/2+27)},
-    {x:host.x+fx*(host.length/2+27),y:host.y+fy*(host.length/2+27)},
-    {x:host.x-fx*(host.length/2+27),y:host.y-fy*(host.length/2+27)},
-    {x:host.x+fx*(host.length/2+18)+sx*(host.width/2+18),y:host.y+fy*(host.length/2+18)+sy*(host.width/2+18)},
-    {x:host.x+fx*(host.length/2+18)-sx*(host.width/2+18),y:host.y+fy*(host.length/2+18)-sy*(host.width/2+18)},
-    {x:host.x-fx*(host.length/2+18)+sx*(host.width/2+18),y:host.y-fy*(host.length/2+18)+sy*(host.width/2+18)},
-    {x:host.x-fx*(host.length/2+18)-sx*(host.width/2+18),y:host.y-fy*(host.length/2+18)-sy*(host.width/2+18)}
+    {x:host.x+ox*radial,y:host.y+oy*radial},
+    {x:host.x+ox*radial+px*18,y:host.y+oy*radial+py*18},
+    {x:host.x+ox*radial-px*18,y:host.y+oy*radial-py*18},
+    {x:host.x+sx*(host.width/2+31),y:host.y+sy*(host.width/2+31)},
+    {x:host.x-sx*(host.width/2+31),y:host.y-sy*(host.width/2+31)},
+    {x:host.x-fx*(host.length/2+31),y:host.y-fy*(host.length/2+31)},
+    {x:host.x+fx*(host.length/2+22)+sx*(host.width/2+22),y:host.y+fy*(host.length/2+22)+sy*(host.width/2+22)},
+    {x:host.x+fx*(host.length/2+22)-sx*(host.width/2+22),y:host.y+fy*(host.length/2+22)-sy*(host.width/2+22)},
+    {x:host.x-fx*(host.length/2+22)+sx*(host.width/2+22),y:host.y-fy*(host.length/2+22)+sy*(host.width/2+22)},
+    {x:host.x-fx*(host.length/2+22)-sx*(host.width/2+22),y:host.y-fy*(host.length/2+22)-sy*(host.width/2+22)}
   ];
 
-  function badgePoly(c){
+  function badgePoly(c,pad=0){
     return[
-      {x:c.x-halfW,y:c.y-halfH},
-      {x:c.x+halfW,y:c.y-halfH},
-      {x:c.x+halfW,y:c.y+halfH},
-      {x:c.x-halfW,y:c.y+halfH}
+      {x:c.x-halfW-pad,y:c.y-halfH-pad},
+      {x:c.x+halfW+pad,y:c.y-halfH-pad},
+      {x:c.x+halfW+pad,y:c.y+halfH+pad},
+      {x:c.x-halfW-pad,y:c.y+halfH+pad}
     ];
   }
-  function inYard(c){
-    return c.x-halfW>=JAM.x+6&&c.x+halfW<=JAM.x+JAM.w-6&&
-           c.y-halfH>=JAM.y+6&&c.y+halfH<=JAM.y+JAM.h-6;
+  function inYard(c,pad=0){
+    return c.x-halfW-pad>=JAM.x+5&&c.x+halfW+pad<=JAM.x+JAM.w-5&&
+           c.y-halfH-pad>=JAM.y+5&&c.y+halfH+pad<=JAM.y+JAM.h-5;
+  }
+  function clearOfTrucks(c){
+    // Reserve a real visual pocket around the counter, not merely a
+    // non-overlapping rectangle.
+    const p=badgePoly(c,10);
+    return !trucks.some(t=>polyOverlap(p,truckPoly(t),0));
+  }
+  function clearOfExitPaths(c){
+    const p=badgePoly(c,7);
+    for(const t of trucks){
+      // Only trucks that can currently move can visually cross the
+      // counter before the cluster changes. Always include the garage
+      // host because it must be able to leave without driving through
+      // its own remaining-truck number.
+      if(t.id!==host.id&&!canDriveOut(t,trucks))continue;
+      const dx=Math.cos(t.angle),dy=Math.sin(t.angle);
+      for(let d=0;d<=130;d+=13){
+        const x=t.x+dx*d,y=t.y+dy*d;
+        if(polyOverlap(p,truckPoly(t,x,y),0))return false;
+        if(d>0&&!insideJam(t,x,y))break;
+      }
+    }
+    return true;
+  }
+  function nearestClearance(c){
+    let best=Infinity;
+    const br=Math.hypot(halfW,halfH);
+    for(const t of trucks){
+      const tr=Math.hypot(t.length/2,t.width/2);
+      best=Math.min(best,Math.hypot(c.x-t.x,c.y-t.y)-tr-br);
+    }
+    return best;
   }
 
+  const hostRadius=Math.hypot(host.x-cx,host.y-cy);
+  let best=null;
   for(const c of candidates){
-    if(!inYard(c))continue;
-    const p=badgePoly(c);
-    if(trucks.some(t=>polyOverlap(p,truckPoly(t),6)))continue;
-    return{x:c.x,y:c.y,w:badgeW,h:badgeH};
+    if(!inYard(c,8))continue;
+    const outwardGain=Math.hypot(c.x-cx,c.y-cy)-hostRadius;
+    if(outwardGain<8)continue;
+    if(!clearOfTrucks(c))continue;
+    if(!clearOfExitPaths(c))continue;
+
+    const clearance=nearestClearance(c);
+    const score=outwardGain*1.6+clearance;
+    if(!best||score>best.score){
+      best={x:c.x,y:c.y,w:badgeW,h:badgeH,score,clearance};
+    }
   }
-  return null;
+  return best;
 }
 function addUndergroundGarage(gen,r,n){
   const profile=difficultyProfile(n);
@@ -501,8 +555,9 @@ function addUndergroundGarage(gen,r,n){
   });
   const preferred=early.length?early:free;
 
-  // A garage may only occupy a truck position if there is a separate clear
-  // patch beside it for the remaining-truck counter.
+  // A garage is only allowed on an exposed truck position with a reserved
+  // counter pocket. Choose the clearest valid location rather than the
+  // first/random location, so the number never sits inside the truck pile.
   const eligible=[];
   for(const t of preferred){
     const badge=garageBadgePlacement(t,gen.trucks);
@@ -517,7 +572,8 @@ function addUndergroundGarage(gen,r,n){
   }
   if(!eligible.length)return !forced;
 
-  const picked=choice(r,eligible);
+  eligible.sort((a,b)=>b.badge.score-a.badge.score);
+  const picked=eligible[0];
   const host=picked.host,badge=picked.badge;
   const extra=n<7?2:n<12?rint(r,2,3):rint(r,3,4),queue=[];
   for(let i=0;i<extra;i++){
