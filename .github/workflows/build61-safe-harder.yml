@@ -1,0 +1,39 @@
+name: Build 61 Safe Harder Levels
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build61-safe-harder.yml'
+      - 'tools/build61_safe_harder.py'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply safe difficulty patch
+        run: python3 tools/build61_safe_harder.py
+
+      - name: Check JavaScript syntax
+        run: |
+          node --check sweet-truck-jam/game.js
+          node --check sweet-truck-jam/game61.js
+
+      - name: Publish Build 61
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add sweet-truck-jam/game.js sweet-truck-jam/game61.js sweet-truck-jam/index.html
+          if git diff --cached --quiet; then
+            echo 'No generated changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Publish Build 61 with safer harder puzzle sequencing'
+          git push
