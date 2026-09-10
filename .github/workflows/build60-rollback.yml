@@ -1,0 +1,40 @@
+name: Build 60 Rollback to Working Game
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build60-rollback.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore Build 58 gameplay and publish Build 60
+        shell: bash
+        run: |
+          cp sweet-truck-jam/game58.js sweet-truck-jam/game.js
+          cp sweet-truck-jam/game58.js sweet-truck-jam/game60.js
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('sweet-truck-jam/index.html')
+          s=p.read_text()
+          s=re.sub(r'game(?:\d+)?\.js\?v=\d+','game60.js?v=60',s)
+          s=re.sub(r'style\.css\?v=\d+','style.css?v=60',s)
+          p.write_text(s)
+          PY
+          node --check sweet-truck-jam/game.js
+          node --check sweet-truck-jam/game60.js
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add sweet-truck-jam/game.js sweet-truck-jam/game60.js sweet-truck-jam/index.html
+          git commit -m 'Publish Build 60 restoring last working gameplay'
+          git push
