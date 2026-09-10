@@ -1,0 +1,155 @@
+name: Build 54 3D Sweets
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build54-3d-sweets.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Render sweets as 3D spheres and publish Build 54
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('sweet-truck-jam/game.js')
+          s = path.read_text()
+
+          start = s.index('function drawCandy(c,index){')
+          end = s.index('function drawFeederRows(', start)
+          sphere_block = r'''function drawCandy(c,index){
+            const p=candyPos(c.visualIndex);
+            drawSweetAt(p,c.color,SWEET_RADIUS);
+          }
+          function drawSweetAt(p,color,r=SWEET_RADIUS){
+            const base=COLORS[color]||'#999';
+
+            ctx.save();
+            ctx.translate(p.x,p.y);
+
+            // Soft contact shadow beneath the sphere.
+            ctx.beginPath();
+            ctx.ellipse(r*.14,r*.56,r*.82,r*.34,0,0,Math.PI*2);
+            ctx.fillStyle='rgba(0,0,0,.20)';
+            ctx.fill();
+
+            // Main spherical shading: bright upper-left to dark lower-right.
+            const sphere=ctx.createRadialGradient(
+              -r*.40,-r*.43,r*.04,
+              r*.12,r*.14,r*1.18
+            );
+            sphere.addColorStop(0,'rgba(255,255,255,.98)');
+            sphere.addColorStop(.11,shade(base,.36));
+            sphere.addColorStop(.34,shade(base,.14));
+            sphere.addColorStop(.62,base);
+            sphere.addColorStop(.84,shade(base,-.18));
+            sphere.addColorStop(1,shade(base,-.36));
+
+            ctx.beginPath();
+            ctx.arc(0,0,r,0,Math.PI*2);
+            ctx.fillStyle=sphere;
+            ctx.fill();
+
+            // Darker lower hemisphere gives the small sweets more volume.
+            const lower=ctx.createLinearGradient(0,-r*.15,0,r);
+            lower.addColorStop(0,'rgba(0,0,0,0)');
+            lower.addColorStop(.58,'rgba(0,0,0,.02)');
+            lower.addColorStop(1,'rgba(0,0,0,.20)');
+            ctx.beginPath();
+            ctx.arc(0,0,r*.96,0,Math.PI*2);
+            ctx.fillStyle=lower;
+            ctx.fill();
+
+            // Glossy reflection.
+            const gloss=ctx.createRadialGradient(
+              -r*.34,-r*.37,0,
+              -r*.27,-r*.29,r*.56
+            );
+            gloss.addColorStop(0,'rgba(255,255,255,.96)');
+            gloss.addColorStop(.30,'rgba(255,255,255,.58)');
+            gloss.addColorStop(.72,'rgba(255,255,255,.13)');
+            gloss.addColorStop(1,'rgba(255,255,255,0)');
+            ctx.beginPath();
+            ctx.arc(-r*.18,-r*.22,r*.49,0,Math.PI*2);
+            ctx.fillStyle=gloss;
+            ctx.fill();
+
+            // Small hard specular highlight.
+            ctx.beginPath();
+            ctx.arc(-r*.43,-r*.46,Math.max(.7,r*.11),0,Math.PI*2);
+            ctx.fillStyle='rgba(255,255,255,.98)';
+            ctx.fill();
+
+            // Fine lower rim keeps pale colours visibly spherical.
+            ctx.beginPath();
+            ctx.arc(0,0,r-.3,.10*Math.PI,.90*Math.PI);
+            ctx.strokeStyle='rgba(0,0,0,.15)';
+            ctx.lineWidth=Math.max(.7,r*.08);
+            ctx.stroke();
+
+            ctx.restore();
+          }
+          '''
+          s = s[:start] + sphere_block + s[end:]
+
+          pstart = s.index('function drawParticles(){')
+          pend = s.index('function update(dt){', pstart)
+          particle_block = r'''function drawParticles(){
+            for(const p of state.particles){
+              const local=p.t-(p.delay||0);
+              if(local<0){
+                drawSweetAt({x:p.sx,y:p.sy},p.color,SWEET_RADIUS);
+                continue;
+              }
+              const raw=clamp(local/p.duration,0,1),u=ease(raw),q=1-u;
+              const c1x=p.c1x??p.cx??p.sx,c1y=p.c1y??p.cy??p.sy;
+              const c2x=p.c2x??p.cx??p.tx,c2y=p.c2y??p.cy??p.ty;
+              const x=q*q*q*p.sx+3*q*q*u*c1x+3*q*u*u*c2x+u*u*u*p.tx;
+              const y=q*q*q*p.sy+3*q*q*u*c1y+3*q*u*u*c2y+u*u*u*p.ty;
+              ctx.globalAlpha=1-raw*.12;
+              drawSweetAt({x,y},p.color,SWEET_RADIUS*(1-raw*.06));
+              ctx.globalAlpha=1;
+            }
+          }
+
+          '''
+          s = s[:pstart] + particle_block + s[pend:]
+
+          # Guard the requested revert: this build must keep the small sweets
+          # and the pre-doubling 36-row central conveyor.
+          assert 'const SWEET_RADIUS=7;' in s
+          assert 'const ROTATION_CAPACITY=144;' in s
+          assert "if(LOOP_ROWS>36)" in s
+          assert 'const CENTRAL_LANE_SPACING=13.2;' in s
+          assert 'const TRUCK_GAP=3;' in s
+
+          path.write_text(s)
+          Path('sweet-truck-jam/game54.js').write_text(s)
+
+          index = Path('sweet-truck-jam/index.html')
+          html = index.read_text()
+          html = re.sub(r'game(?:\d+)?\.js\?v=\d+', 'game54.js?v=54', html)
+          html = re.sub(r'style\.css\?v=\d+', 'style.css?v=54', html)
+          index.write_text(html)
+          PY
+
+          node --check sweet-truck-jam/game.js
+          node --check sweet-truck-jam/game54.js
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add sweet-truck-jam/game.js sweet-truck-jam/game54.js sweet-truck-jam/index.html
+          git commit -m 'Publish Build 54 with 3D sphere sweets'
+          git push
