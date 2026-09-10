@@ -1,0 +1,32 @@
+name: Build 64 Full Parking Lot Framing
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build64-fit-full-parking-lot.yml'
+      - '.github/scripts/build64_fit_full_parking_lot.py'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply Build 64 patch
+        run: python3 .github/scripts/build64_fit_full_parking_lot.py
+      - name: Check JavaScript
+        run: |
+          node --check sweet-truck-jam/game.js
+          node --check sweet-truck-jam/game64.js
+      - name: Commit Build 64
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add sweet-truck-jam/game.js sweet-truck-jam/game64.js sweet-truck-jam/index.html
+          git commit -m 'Publish Build 64 with full parking lot visible'
+          git push
