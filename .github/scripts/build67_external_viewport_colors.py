@@ -112,7 +112,7 @@ s=s[:start]+assign+s[end:]
 # this independent viewport/colour patch.
 for needle in [
     "const forced=n>=5;",
-    "function garageBlocksTruck(t,poly=null,g=activeGarageObstacle())",
+    "function truckCrossesGarage(t,x,y,g,pad=0)",
     "const SWEET_RADIUS=7;",
     "const ROTATION_CAPACITY=144;"
 ]:
