@@ -1,0 +1,36 @@
+name: Build 66 Harder Garage Obstacles
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build66-harder-garage-obstacles.yml'
+      - '.github/scripts/build66_harder_garage_obstacles.py'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply Build 66 patch
+        run: python3 .github/scripts/build66_harder_garage_obstacles.py
+      - name: Check JavaScript
+        run: |
+          node --check sweet-truck-jam/game.js
+          node --check sweet-truck-jam/game66.js
+      - name: Commit Build 66
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add sweet-truck-jam/game.js sweet-truck-jam/game66.js sweet-truck-jam/index.html
+          if git diff --cached --quiet; then
+            echo 'No generated changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Publish Build 66 with harder garage obstacle levels'
+          git push
