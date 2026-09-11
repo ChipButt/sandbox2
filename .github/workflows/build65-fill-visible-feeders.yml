@@ -1,0 +1,32 @@
+name: Build 65 Fill Visible Feeders
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build65-fill-visible-feeders.yml'
+      - '.github/scripts/build65_fill_visible_feeders.py'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply Build 65 patch
+        run: python3 .github/scripts/build65_fill_visible_feeders.py
+      - name: Check JavaScript
+        run: |
+          node --check sweet-truck-jam/game.js
+          node --check sweet-truck-jam/game65.js
+      - name: Commit Build 65
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add sweet-truck-jam/game.js sweet-truck-jam/game65.js sweet-truck-jam/index.html
+          git commit -m 'Publish Build 65 with fully populated visible feeders'
+          git push
