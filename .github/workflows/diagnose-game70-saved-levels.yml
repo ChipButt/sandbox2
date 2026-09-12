@@ -1,0 +1,37 @@
+name: Diagnose game70 saved levels
+
+on:
+  push:
+    paths:
+      - '.github/workflows/diagnose-game70-saved-levels.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test saved levels in browser
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          python3 -m http.server 8123 >/tmp/sweet-http.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID || true' EXIT
+          sleep 1
+          CHROME=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser)
+          if [ -z "$CHROME" ]; then echo 'Chrome missing'; exit 1; fi
+          for LEVEL in 1 2 3 4 5 6 7 8 9 10 12 15 20 25 30 40 50 75 100; do
+            cat > sweet-truck-jam/diag.html <<EOF
+          <!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css?v=70"></head><body>
+          <div id="app"><canvas id="game"></canvas><div id="toast"></div><div id="overlay" class="hidden"><div class="card"><div class="badge" id="overlayBadge">!</div><h1 id="overlayTitle"></h1><p id="overlayText"></p><button id="overlayPrimary"></button><button id="overlaySecondary"></button></div></div></div>
+          <script>localStorage.setItem('sweet-fever-level','$LEVEL')</script><script src="game70.js?v=70"></script></body></html>
+          EOF
+            echo "Testing saved level $LEVEL"
+            timeout 20s "$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=12000 --dump-dom "http://127.0.0.1:8123/sweet-truck-jam/diag.html?level=$LEVEL" > "/tmp/dom-$LEVEL.html" 2> "/tmp/chrome-$LEVEL.log" || true
+            if grep -q 'data-game-ready="1"' "/tmp/dom-$LEVEL.html"; then
+              echo "LEVEL $LEVEL: PASS"
+            else
+              echo "LEVEL $LEVEL: FAIL"
+              tail -30 "/tmp/chrome-$LEVEL.log" || true
+              tail -30 "/tmp/dom-$LEVEL.html" || true
+            fi
+          done
