@@ -1,0 +1,97 @@
+name: Build game72
+
+on:
+  push:
+    paths:
+      - '.github/workflows/build-game72.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Generate Build 72
+        run: python sweet-truck-jam/build72.py
+
+      - name: Syntax check
+        run: node --check sweet-truck-jam/game72.js
+
+      - name: Test saved levels and difficulty
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          python3 -m http.server 8123 >/tmp/sweet-http.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID || true' EXIT
+          sleep 1
+          CHROME=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser)
+          test -n "$CHROME"
+          FAIL=0
+          for LEVEL in 1 2 3 4 5 6 7 8 9 10 12 15 20 25 40 75 100; do
+            cat > sweet-truck-jam/test72.html <<EOF
+          <!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css?v=72"></head><body>
+          <div id="app"><canvas id="game"></canvas><div id="toast"></div><div id="overlay" class="hidden"><div class="card"><div class="badge" id="overlayBadge">!</div><h1 id="overlayTitle"></h1><p id="overlayText"></p><button id="overlayPrimary"></button><button id="overlaySecondary"></button></div></div></div>
+          <script>localStorage.setItem('sweet-fever-level','$LEVEL')</script><script src="game72.js?v=72"></script></body></html>
+          EOF
+            echo "Testing saved level $LEVEL"
+            timeout 35s "$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=22000 --dump-dom "http://127.0.0.1:8123/sweet-truck-jam/test72.html?level=$LEVEL" > "/tmp/dom-$LEVEL.html" 2> "/tmp/chrome-$LEVEL.log" || true
+            if ! grep -q 'data-game-ready="1"' "/tmp/dom-$LEVEL.html"; then
+              echo "LEVEL $LEVEL: START FAIL"
+              tail -20 "/tmp/dom-$LEVEL.html" || true
+              FAIL=1
+              continue
+            fi
+            MAX=$(grep -o 'data-max-parked="[0-9]*"' "/tmp/dom-$LEVEL.html" | head -1 | grep -o '[0-9]*' || true)
+            WRONG=$(grep -o 'data-forced-wrong="[0-9]*"' "/tmp/dom-$LEVEL.html" | head -1 | grep -o '[0-9]*' || true)
+            FREE=$(grep -o 'data-initial-free="[0-9]*"' "/tmp/dom-$LEVEL.html" | head -1 | grep -o '[0-9]*' || true)
+            SAFE=$(grep -o 'data-safe-fallback="[01]"' "/tmp/dom-$LEVEL.html" | head -1 | grep -o '[01]' || true)
+            echo "LEVEL $LEVEL: parked=$MAX wrong=$WRONG free=$FREE safe=$SAFE"
+            if [ "$LEVEL" -ge 4 ]; then
+              if [ -z "$MAX" ] || [ "$MAX" -lt 3 ] || [ -z "$WRONG" ] || [ "$WRONG" -lt 2 ] || [ "$SAFE" != "0" ]; then
+                echo "LEVEL $LEVEL: TOO EASY"
+                FAIL=1
+              fi
+            fi
+            if [ "$LEVEL" -ge 8 ]; then
+              if [ "$MAX" -lt 4 ] || [ "$WRONG" -lt 3 ]; then
+                echo "LEVEL $LEVEL: HARD-TIER TARGET MISSED"
+                FAIL=1
+              fi
+            fi
+          done
+          rm -f sweet-truck-jam/test72.html
+          if [ "$FAIL" -ne 0 ]; then
+            echo 'Build 72 failed startup/difficulty tests'
+            exit 1
+          fi
+
+      - name: Publish Build 72 in index
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('sweet-truck-jam/index.html')
+          s=p.read_text()
+          s=re.sub(r'game(?:\d+)?\.js\?v=\d+','game72.js?v=72',s)
+          s=re.sub(r'style\.css\?v=\d+','style.css?v=72',s)
+          if '<!-- build-71-safe-level-generation -->' in s:
+              s=s.replace('<!-- build-71-safe-level-generation -->','<!-- build-72-hard-puzzle-generation -->')
+          p.write_text(s)
+          PY
+
+      - name: Commit tested build
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add sweet-truck-jam/game72.js sweet-truck-jam/game.js sweet-truck-jam/index.html
+          git commit -m 'Generate and validate Build 72' || exit 0
+          git push
