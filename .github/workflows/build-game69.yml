@@ -1,0 +1,32 @@
+name: Build game69
+
+on:
+  push:
+    paths:
+      - '.github/workflows/build-game69.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Generate standalone build
+        run: python sweet-truck-jam/build69.py
+      - name: Syntax check
+        run: node --check sweet-truck-jam/game69.js
+      - name: Commit generated game
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add sweet-truck-jam/game69.js sweet-truck-jam/game.js
+          git commit -m 'Generate standalone Build 69' || exit 0
+          git push
