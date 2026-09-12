@@ -1,0 +1,66 @@
+name: Build game70
+
+on:
+  push:
+    paths:
+      - '.github/workflows/build-game70.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Generate Build 70 from last working build
+        run: python sweet-truck-jam/build70.py
+      - name: Syntax check
+        run: node --check sweet-truck-jam/game70.js
+      - name: Prepare smoke-test page
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('sweet-truck-jam/index.html')
+          s=p.read_text()
+          import re
+          s=re.sub(r'game(?:\d+)?\.js\?v=\d+','game70.js?v=70',s)
+          s=re.sub(r'style\.css\?v=\d+','style.css?v=70',s)
+          p.write_text(s)
+          PY
+      - name: Browser smoke test
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          python3 -m http.server 8123 >/tmp/sweet-http.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID || true' EXIT
+          sleep 1
+          CHROME=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser)
+          if [ -z "$CHROME" ]; then
+            echo 'Chrome/Chromium is not available on this runner'
+            exit 1
+          fi
+          "$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=12000 --dump-dom http://127.0.0.1:8123/sweet-truck-jam/ >/tmp/sweet-dom.html 2>/tmp/sweet-chrome.log || {
+            cat /tmp/sweet-chrome.log
+            exit 1
+          }
+          grep -q 'data-game-ready="1"' /tmp/sweet-dom.html || {
+            echo 'Game never reached its first rendered frame'
+            cat /tmp/sweet-chrome.log
+            tail -100 /tmp/sweet-dom.html
+            exit 1
+          }
+          echo 'Browser smoke test passed: first game frame rendered.'
+      - name: Commit tested Build 70
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add sweet-truck-jam/game70.js sweet-truck-jam/game.js sweet-truck-jam/index.html
+          git commit -m 'Generate and smoke-test Build 70' || exit 0
+          git push
