@@ -1,0 +1,80 @@
+name: Build game71
+
+on:
+  push:
+    paths:
+      - '.github/workflows/build-game71.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Generate Build 71
+        run: python sweet-truck-jam/build71.py
+
+      - name: Syntax check
+        run: node --check sweet-truck-jam/game71.js
+
+      - name: Test saved levels reach first frame
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          python3 -m http.server 8123 >/tmp/sweet-http.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID || true' EXIT
+          sleep 1
+          CHROME=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser)
+          test -n "$CHROME"
+          FAIL=0
+          for LEVEL in 1 2 3 4 5 6 7 8 9 10 12 15 20 25 30 40 50 75 100; do
+            cat > sweet-truck-jam/test71.html <<EOF
+          <!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css?v=71"></head><body>
+          <div id="app"><canvas id="game"></canvas><div id="toast"></div><div id="overlay" class="hidden"><div class="card"><div class="badge" id="overlayBadge">!</div><h1 id="overlayTitle"></h1><p id="overlayText"></p><button id="overlayPrimary"></button><button id="overlaySecondary"></button></div></div></div>
+          <script>localStorage.setItem('sweet-fever-level','$LEVEL')</script><script src="game71.js?v=71"></script></body></html>
+          EOF
+            echo "Testing saved level $LEVEL"
+            timeout 25s "$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=16000 --dump-dom "http://127.0.0.1:8123/sweet-truck-jam/test71.html?level=$LEVEL" > "/tmp/dom-$LEVEL.html" 2> "/tmp/chrome-$LEVEL.log" || true
+            if grep -q 'data-game-ready="1"' "/tmp/dom-$LEVEL.html"; then
+              echo "LEVEL $LEVEL: PASS"
+            else
+              echo "LEVEL $LEVEL: FAIL"
+              tail -25 "/tmp/dom-$LEVEL.html" || true
+              FAIL=1
+            fi
+          done
+          rm -f sweet-truck-jam/test71.html
+          if [ "$FAIL" -ne 0 ]; then
+            echo 'Build 71 failed saved-level smoke tests'
+            exit 1
+          fi
+
+      - name: Publish Build 71 in index
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('sweet-truck-jam/index.html')
+          s=p.read_text()
+          import re
+          s=re.sub(r'game(?:\d+)?\.js\?v=\d+','game71.js?v=71',s)
+          s=re.sub(r'style\.css\?v=\d+','style.css?v=71',s)
+          s=s.replace('<!-- build-69-standalone-deadlock-recovery -->','<!-- build-71-safe-level-generation -->')
+          p.write_text(s)
+          PY
+
+      - name: Commit tested build
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add sweet-truck-jam/game71.js sweet-truck-jam/game.js sweet-truck-jam/index.html
+          git commit -m 'Generate and validate Build 71' || exit 0
+          git push
