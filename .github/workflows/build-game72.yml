@@ -21,7 +21,20 @@ jobs:
           node-version: '22'
 
       - name: Generate Build 72
-        run: python sweet-truck-jam/build72.py
+        run: |
+          python sweet-truck-jam/build72.py
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('sweet-truck-jam/game72.js')
+          s=p.read_text()
+          old="const minParked=Math.max(3,profile.minParked-1),minWrong=Math.max(2,profile.minForcedWrong-1);"
+          new="const minParked=n>=8?4:3,minWrong=n>=8?3:2;"
+          if old not in s:
+              raise SystemExit('fallback threshold patch missing')
+          s=s.replace(old,new,1)
+          p.write_text(s)
+          Path('sweet-truck-jam/game.js').write_text(s)
+          PY
 
       - name: Syntax check
         run: node --check sweet-truck-jam/game72.js
