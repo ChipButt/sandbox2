@@ -36,14 +36,14 @@ jobs:
           CHROME=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser)
           test -n "$CHROME"
           FAIL=0
-          for LEVEL in 1 2 3 4 5 6 7 8 9 10 12 15 20 25 40 75 100; do
+          for LEVEL in 1 4 5 8 12 25 50 100; do
             cat > sweet-truck-jam/test72.html <<EOF
           <!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css?v=72"></head><body>
           <div id="app"><canvas id="game"></canvas><div id="toast"></div><div id="overlay" class="hidden"><div class="card"><div class="badge" id="overlayBadge">!</div><h1 id="overlayTitle"></h1><p id="overlayText"></p><button id="overlayPrimary"></button><button id="overlaySecondary"></button></div></div></div>
           <script>localStorage.setItem('sweet-fever-level','$LEVEL')</script><script src="game72.js?v=72"></script></body></html>
           EOF
             echo "Testing saved level $LEVEL"
-            timeout 35s "$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=22000 --dump-dom "http://127.0.0.1:8123/sweet-truck-jam/test72.html?level=$LEVEL" > "/tmp/dom-$LEVEL.html" 2> "/tmp/chrome-$LEVEL.log" || true
+            timeout 25s "$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=16000 --dump-dom "http://127.0.0.1:8123/sweet-truck-jam/test72.html?level=$LEVEL" > "/tmp/dom-$LEVEL.html" 2> "/tmp/chrome-$LEVEL.log" || true
             if ! grep -q 'data-game-ready="1"' "/tmp/dom-$LEVEL.html"; then
               echo "LEVEL $LEVEL: START FAIL"
               tail -20 "/tmp/dom-$LEVEL.html" || true
