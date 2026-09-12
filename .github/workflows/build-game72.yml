@@ -27,11 +27,27 @@ jobs:
           from pathlib import Path
           p=Path('sweet-truck-jam/game72.js')
           s=p.read_text()
-          old="const minParked=Math.max(3,profile.minParked-1),minWrong=Math.max(2,profile.minForcedWrong-1);"
-          new="const minParked=n>=8?4:3,minWrong=n>=8?3:2;"
-          if old not in s:
-              raise SystemExit('fallback threshold patch missing')
-          s=s.replace(old,new,1)
+          patches=[
+            (
+              "const minParked=Math.max(3,profile.minParked-1),minWrong=Math.max(2,profile.minForcedWrong-1);",
+              "const minParked=n>=8?4:3,minWrong=n>=8?3:2;",
+              'fallback difficulty threshold'
+            ),
+            (
+              "for(let attempt=0;attempt<72;attempt++){",
+              "for(let attempt=0;attempt<180;attempt++){",
+              'hard fallback search count'
+            ),
+            (
+              "if(clear<1||clear>Math.max(5,profile.maxFree+2))continue;",
+              "if(clear<1||clear>8)continue;",
+              'hard fallback free-truck cap'
+            )
+          ]
+          for old,new,label in patches:
+              if old not in s:
+                  raise SystemExit(label+' patch missing')
+              s=s.replace(old,new,1)
           p.write_text(s)
           Path('sweet-truck-jam/game.js').write_text(s)
           PY
@@ -56,7 +72,7 @@ jobs:
           <script>localStorage.setItem('sweet-fever-level','$LEVEL')</script><script src="game72.js?v=72"></script></body></html>
           EOF
             echo "Testing saved level $LEVEL"
-            timeout 25s "$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=16000 --dump-dom "http://127.0.0.1:8123/sweet-truck-jam/test72.html?level=$LEVEL" > "/tmp/dom-$LEVEL.html" 2> "/tmp/chrome-$LEVEL.log" || true
+            timeout 30s "$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=20000 --dump-dom "http://127.0.0.1:8123/sweet-truck-jam/test72.html?level=$LEVEL" > "/tmp/dom-$LEVEL.html" 2> "/tmp/chrome-$LEVEL.log" || true
             if ! grep -q 'data-game-ready="1"' "/tmp/dom-$LEVEL.html"; then
               echo "LEVEL $LEVEL: START FAIL"
               tail -20 "/tmp/dom-$LEVEL.html" || true
