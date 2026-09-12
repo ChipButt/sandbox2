@@ -6,4 +6,8 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#dfe8ef;fon
 #overlay{position:fixed;inset:0;z-index:50;background:rgba(23,32,46,.52);display:grid;place-items:center;padding:22px;backdrop-filter:blur(6px)}
 #overlay.hidden{display:none}
 .card{width:min(86vw,360px);box-sizing:border-box;background:#fff;border-radius:28px;padding:24px;text-align:center;box-shadow:0 24px 80px rgba(0,0,0,.28)}
-.badge{width:74px;height:74px;margin:0 auto 8px;border-radius:50%;display:grid;place-items:center;background:#e4f7eb;color:#2b9f5d;font-size:40px;font-weight:1000}.card h1{margin:4px 0 8px;font-size:28px;color:#26344b}.card p{margin:0 0 16px;color:#728099;font-weight:700;line-height:1.35}.card button{width:100%;min-height:50px;border:0;border-radius:15px;margin-top:9px;font-weight:1000;font-size:15px}.card button:first-of-type{background:#2c5aa0;color:#fff}.card button:last-of-type{background:#edf2f7;color:#344158}
+.badge{width:74px;height:74px;margin:0 auto 8px;border-radius:50%;display:grid;place-items:center;background:#e4f7eb;color:#2b9f5d;font-size:40px;font-weight:1000}.card h1{margin:4px 0 8px;font-size:28px;color:#26344b}.card p{margin:0 0 16px;color:#728099;font-weight:700;line-height:1.35}.card button{width:100%;min-height:50px;border:0;border-radius:15px;margin-top:9px;font-weight:1000;font-size:15px}.card button:disabled{opacity:.45}
+#overlayPrimary{background:#2c5aa0;color:#fff}
+#overlayRescue{background:#e5f6e7;color:#278242}
+#overlaySecondary{background:#edf2f7;color:#344158}
+#overlayTertiary{background:#f8ecec;color:#b14949}
